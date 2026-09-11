@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Custom local and Tailscale endpoints are user-configured at runtime, so
+         Android cannot express a fixed host allow-list here. Prefer HTTPS for
+         public services and use HTTP only inside a trusted private network. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

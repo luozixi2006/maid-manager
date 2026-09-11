@@ -1,0 +1,46 @@
+# Gradle and Kotlin
+.gradle/
+.kotlin/
+build/
+**/build/
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Machine-local Android configuration
+local.properties
+
+# Signing material and credentials
+*.keystore
+*.jks
+*.p12
+*.pfx
+signing.properties
+.env
+.env.*
+!.env.example
+secrets.properties
+
+# Generated packages, reports, logs and local data
+*.apk
+*.aab
+*.apks
+*.log
+*.db
+*.sqlite
+*.sqlite3
+*.tmp
+cache/
+captures/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# The wrapper JAR is required for reproducible builds.
+!gradle/wrapper/gradle-wrapper.jar
