@@ -18,10 +18,10 @@ jobs:
     env:
       RELEASE_NOTES: ${{ github.event.head_commit.message || '手动发布' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -75,7 +75,7 @@ jobs:
           test -x "$APKSIGNER"
           SIGNATURE_REPORT="$("$APKSIGNER" verify --verbose --print-certs "$RUNNER_TEMP/$APK_NAME")"
           printf '%s\n' "$SIGNATURE_REPORT"
-          ACTUAL_CERT_SHA256="$(printf '%s\n' "$SIGNATURE_REPORT" | awk -F': ' '/certificate SHA-256 digest/ {print tolower($2); exit}' | tr -d '[:space:]:')"
+          ACTUAL_CERT_SHA256="$(printf '%s\n' "$SIGNATURE_REPORT" | awk -F': ' '/certificate SHA-256 digest/ {print tolower($NF); exit}' | tr -d '[:space:]:')"
           EXPECTED_CERT_SHA256="$(printf '%s' "$EXPECTED_SIGNING_CERT_SHA256" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]:')"
           test -n "$ACTUAL_CERT_SHA256"
           test -n "$EXPECTED_CERT_SHA256"
