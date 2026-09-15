@@ -114,6 +114,7 @@ fun ChatScreen(
     onPhotoError: (String) -> Unit,
     onNew: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenTasks: (String) -> Unit,
     onEditPersona: () -> Unit,
     onPickModel: () -> Unit
 ) {
@@ -161,6 +162,9 @@ fun ChatScreen(
             onNew = onNew
         )
 
+        androidx.compose.material3.TextButton(onClick = { onOpenTasks(input) }, modifier = Modifier.align(Alignment.End)) {
+            Text("交给我做 · 后台任务")
+        }
         if (messages.isEmpty()) {
             Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally) {

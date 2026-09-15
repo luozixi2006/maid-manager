@@ -54,6 +54,7 @@ object ProactiveNotifications {
         avatarPath: String?,
         destination: ProactiveDestination
     ) {
+        com.miniichat.tasks.PetMessages.show("$characterName：$message")
         if (AppVisibility.isForeground) {
             ProactiveNavigation.showForegroundNotice("$characterName：$message")
             return

@@ -52,6 +52,7 @@ fun SettingsScreen(
     onOpenSearch: () -> Unit,
     onOpenChatData: () -> Unit,
     onOpenProactiveMessages: () -> Unit,
+    onOpenTasks: () -> Unit,
     onOpenErrors: () -> Unit,
     onOpenUpdates: () -> Unit,
     onOpenAppearance: () -> Unit,
@@ -90,6 +91,7 @@ fun SettingsScreen(
             }
 
             SettingsSection(stringResource(R.string.section_conversation)) {
+                SettingsEntry(title = "交给我做", subtitle = "后台任务、屏幕边缘陪伴与事件触发", onClick = onOpenTasks)
                 SettingsEntry(
                     title = stringResource(R.string.personas),
                     subtitle = assistant?.name ?: stringResource(R.string.no_persona_selected),

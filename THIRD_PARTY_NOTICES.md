@@ -27,6 +27,7 @@
 | kotlinx.coroutines | 1.8.1 | Apache-2.0 |
 | JUnit 4 | 4.13.2 | EPL-1.0 |
 | Gradle Wrapper | 随仓库提供 | Apache-2.0 |
+| PdfBox-Android | 2.0.27.0 | Apache-2.0 |
 
 Ktor 的 Android HTTP 实现会传递使用 OkHttp；OkHttp 采用 Apache-2.0。
 

@@ -7,11 +7,11 @@ plugins {
 
 val suppliedVersionCode = providers.gradleProperty("BUILD_VERSION_CODE").orNull
 val buildVersionCode = when {
-    suppliedVersionCode == null -> 300000003
+    suppliedVersionCode == null -> 300000004
     suppliedVersionCode.toIntOrNull()?.let { it in 1..2_100_000_000 } == true -> suppliedVersionCode.toInt()
     else -> error("BUILD_VERSION_CODE must be an integer from 1 to 2100000000")
 }
-val buildVersionName = providers.gradleProperty("BUILD_VERSION_NAME").orNull ?: "3.0.3"
+val buildVersionName = providers.gradleProperty("BUILD_VERSION_NAME").orNull ?: "3.0.4"
 require(buildVersionName.matches(Regex("[0-9A-Za-z][0-9A-Za-z._+-]{0,63}"))) {
     "BUILD_VERSION_NAME contains unsupported characters"
 }
@@ -160,6 +160,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation("androidx.navigation:navigation-compose:2.8.1")
 
     implementation("androidx.compose.ui:ui")

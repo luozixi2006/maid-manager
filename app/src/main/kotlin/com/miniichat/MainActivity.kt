@@ -1,5 +1,8 @@
 package com.miniichat
 
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
@@ -68,6 +71,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { com.miniichat.tasks.TaskActions.recover(this@MainActivity) }.onFailure {
+                com.miniichat.error.AppErrorStore(this@MainActivity).record(it,
+                    com.miniichat.error.AppErrorContext(area = com.miniichat.error.ErrorArea.TASK,
+                        operation = com.miniichat.error.ErrorOperation.READ_LOCAL_DATA))
+            }
+        }
         AppVisibility.isForeground = true
     }
 
@@ -77,6 +87,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleProactiveIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra("phone_tasks", false) == true) {
+            com.miniichat.tasks.TaskNavigation.open.value = true
+            intent.removeExtra("phone_tasks")
+        }
         val source = intent?.getStringExtra(ProactiveNotifications.EXTRA_SOURCE).orEmpty()
         if (source != "normal") return
         ProactiveNavigation.open(

@@ -31,7 +31,7 @@ import kotlinx.coroutines.launch
 
 private enum class Screen {
     Chat, Settings, Providers, ProviderEdit, Assistants, Memories, TtsSettings, SearchSettings,
-    Appearance, About, ChatData, HandoffEditor, ProactiveMessages, ErrorCenter, Updates
+    Appearance, About, ChatData, HandoffEditor, ProactiveMessages, ErrorCenter, Updates, Tasks
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -72,7 +72,7 @@ fun AppRoot(vm: ChatViewModel) {
     androidx.activity.compose.BackHandler(
         enabled = screen in setOf(
             Screen.Memories, Screen.TtsSettings, Screen.SearchSettings, Screen.Appearance, Screen.About,
-            Screen.ChatData, Screen.ProactiveMessages, Screen.ErrorCenter, Screen.Updates
+            Screen.ChatData, Screen.ProactiveMessages, Screen.ErrorCenter, Screen.Updates, Screen.Tasks
         )
     ) { screen = Screen.Settings }
     androidx.activity.compose.BackHandler(enabled = screen == Screen.HandoffEditor) {
@@ -96,6 +96,10 @@ fun AppRoot(vm: ChatViewModel) {
     val chatDataPhase by vm.chatDataPhase.collectAsState()
     val proactiveDestination by ProactiveNavigation.destination.collectAsState()
     val proactiveNotice by ProactiveNavigation.foregroundNotice.collectAsState()
+    val openTasks by com.miniichat.tasks.TaskNavigation.open.collectAsState()
+    LaunchedEffect(openTasks) {
+        if (openTasks) { screen = Screen.Tasks; com.miniichat.tasks.TaskNavigation.open.value = false }
+    }
 
     val activeConv = conversations.firstOrNull { it.id == activeId }
     val activeProvider = providers.firstOrNull { it.id == settings.activeProviderId }
@@ -189,6 +193,10 @@ fun AppRoot(vm: ChatViewModel) {
                         onPhotoError = vm::reportPhotoFailure,
                         onNew = { vm.newConversation() },
                         onOpenSettings = { screen = Screen.Settings },
+                        onOpenTasks = { draft ->
+                            com.miniichat.tasks.TaskNavigation.chatDraft.value = draft
+                            screen = Screen.Tasks
+                        },
                         onEditPersona = {
                             personaReturnScreen = Screen.Chat
                             personaToEdit = conversationAssistant?.id
@@ -225,6 +233,7 @@ fun AppRoot(vm: ChatViewModel) {
                     onOpenSearch = { screen = Screen.SearchSettings },
                     onOpenChatData = { screen = Screen.ChatData },
                     onOpenProactiveMessages = { screen = Screen.ProactiveMessages },
+                    onOpenTasks = { screen = Screen.Tasks },
                     onOpenErrors = { screen = Screen.ErrorCenter },
                     onOpenUpdates = { screen = Screen.Updates },
                     onOpenAppearance = { screen = Screen.Appearance },
@@ -378,6 +387,7 @@ fun AppRoot(vm: ChatViewModel) {
                     onInstall = updateVm::install
                 )
             }
+            Screen.Tasks -> com.miniichat.tasks.TasksScreen(onBack = { screen = Screen.Chat })
         }
 
         }

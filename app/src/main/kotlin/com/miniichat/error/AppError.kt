@@ -40,6 +40,7 @@ enum class ErrorArea(val label: String) {
     IMPORT_EXPORT("导入与导出"),
     UPDATE("软件更新"),
     AUDIO("语音"),
+    TASK("后台任务"),
     SETTINGS("设置"),
     UNKNOWN("其他")
 }
@@ -58,6 +59,7 @@ enum class ErrorOperation(val label: String) {
     DOWNLOAD_UPDATE("下载更新"),
     INSTALL_UPDATE("安装更新"),
     PLAY_AUDIO("播放语音"),
+    EXECUTE_PHONE_TASK("执行手机任务"),
     EXTRACT_MEMORY("提取长期记忆"),
     VALIDATE_SETTINGS("检查设置"),
     UNKNOWN("执行操作")
