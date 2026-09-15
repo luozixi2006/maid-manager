@@ -91,7 +91,7 @@ fun TasksScreen(onBack: () -> Unit) {
                             OutlinedCard(Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(task.goal, style = MaterialTheme.typography.titleMedium)
-                                    Text("${task.state.label} · ${task.cursor}/${task.steps.size} 步 · 下载/${task.scope}", style = MaterialTheme.typography.labelMedium)
+                                    Text(if (task.noticeOnly) "主动消息 · 没有读取文件" else "${task.state.label} · ${task.cursor}/${task.steps.size} 步 · 下载/${task.scope}", style = MaterialTheme.typography.labelMedium)
                                     Text(task.detail)
                                     when (task.state) {
                                         TaskState.PERMISSION -> TextButton(onClick = { tab = 1 }) { Text("开启所需权限") }
@@ -160,7 +160,7 @@ fun TasksScreen(onBack: () -> Unit) {
                     }
                     2 -> {
                         Text("发生什么时来找你", style = MaterialTheme.typography.titleLarge)
-                        Text("规则会把事件类型和规则文字交给当前 AI 服务判断，不上传通知正文。模型先询问，确认后才扫描和规划。每条规则至少间隔一小时。")
+                        Text("规则会把事件类型和规则文字交给当前 AI 服务判断，不上传通知正文。普通提醒不会读取文件；整理文件的建议需确认后才扫描。每条规则至少间隔一小时。")
                         Text("头像开启时约每 15 秒检查；关闭后系统检查至少间隔 15 分钟，可能延迟或漏掉短暂事件。通知监听单独工作。时间触发不是精确闹钟。")
                         var kind by rememberSaveable { mutableStateOf(TriggerKind.FILES) }
                         var match by rememberSaveable { mutableStateOf("") }

@@ -41,8 +41,11 @@ data class PhoneTask(
     val answers: List<String> = emptyList(), val history: List<String> = emptyList(),
     val approvedSuggestion: Boolean = true, val sourceRule: String = "",
     val approvalToken: String = UUID.randomUUID().toString(),
+    val noticeOnly: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(), val updatedAt: Long = createdAt
 )
+
+val PhoneTask.statusLabel: String get() = if (noticeOnly) "主动消息" else state.label
 
 object ToolPolicy {
     val fileTools = setOf("mkdir", "move", "rename")

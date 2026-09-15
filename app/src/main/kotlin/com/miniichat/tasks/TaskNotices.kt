@@ -29,7 +29,7 @@ object TaskNotices {
         val open = PendingIntent.getActivity(context, task.id.hashCode(), openIntent(context),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val builder = NotificationCompat.Builder(context, channel)
-            .setSmallIcon(android.R.drawable.ic_menu_agenda).setContentTitle("${task.characterName} · ${task.state.label}")
+            .setSmallIcon(android.R.drawable.ic_menu_agenda).setContentTitle("${task.characterName} · ${task.statusLabel}")
             .setContentText(task.detail.take(140)).setStyle(NotificationCompat.BigTextStyle().bigText(task.detail.take(1000)))
             .setContentIntent(open).setAutoCancel(!ongoing).setOngoing(ongoing)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setOnlyAlertOnce(ongoing)

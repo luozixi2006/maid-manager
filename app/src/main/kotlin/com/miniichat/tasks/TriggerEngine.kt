@@ -136,7 +136,7 @@ class EventPollWorker(context: Context, params: WorkerParameters) : CoroutineWor
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) { TriggerEngine.poll(applicationContext); Result.success() }
 }
 
-@Serializable private data class EventDecision(val contact: Boolean = false, val reason: String = "")
+@Serializable internal data class EventDecision(val contact: Boolean = false, val reason: String = "", val offerFileTask: Boolean = false)
 class EventDecisionWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val store = TaskStore.of(applicationContext)
@@ -147,13 +147,27 @@ class EventDecisionWorker(context: Context, params: WorkerParameters) : Coroutin
                 ?: error("请先配置当前 AI 服务")
             val client = LlmClient()
             val result = try { client.completeDetailed(provider, settings.activeModel, listOf(
-                ChatMessage("system", "根据用户设置的触发规则和事件类型，判断是否值得联系用户。只返回 JSON {\"contact\":true或false,\"reason\":\"简短理由\"}。没有授权执行任何工具。事件不包含通知正文。"),
+                ChatMessage("system", "根据用户设置的触发规则和事件类型，判断是否值得联系用户。只返回 JSON {\"contact\":true或false,\"reason\":\"直接对用户说的简短中文提醒\",\"offerFileTask\":false}。只有用户规则明确涉及整理PDF时才允许 offerFileTask=true；普通提醒、聊天、喝水、休息等必须为false。没有授权执行任何工具或读取文件。事件不包含通知正文。不得声称完成了没有实际执行的工作。"),
                 ChatMessage("user", taskJson.encodeToString(mapOf("用户规则" to rule.goal, "事件" to inputData.getString("event").orEmpty())))
             ), temperature = 0.2f, structuredJson = true, requestTimeoutMillis = 60000, maxOutputTokens = 500) } finally { client.close() }
             val decision = taskJson.decodeFromString<EventDecision>(result.content.trim().removePrefix("```json").removeSuffix("```").trim())
             val stillEnabled = store.rules().firstOrNull { it.id == rule.id && it.enabled } ?: return@withContext Result.success()
-            if (decision.contact) TaskActions.create(applicationContext, rule.goal, rule.scope, suggestion = true, ruleId = rule.id)
-            store.rule(stillEnabled.copy(status = if (decision.contact) "已发送建议，等待你确认" else "本次无需打扰"))
+            if (decision.contact && decision.offerFileTask) {
+                TaskActions.create(applicationContext, rule.goal, rule.scope, suggestion = true, ruleId = rule.id)
+            } else if (decision.contact) {
+                check(decision.reason.isNotBlank()) { "提醒为空" }
+                val character = com.miniichat.data.AssistantStore(applicationContext).snapshot().firstOrNull { it.id == settings.activeAssistantId }
+                val notice = PhoneTask(goal = "${rule.kind.label} · 主动提醒", providerId = provider.id, providerEndpoint = provider.baseUrl,
+                    model = settings.activeModel, characterName = character?.displayName ?: "女仆", avatarPath = character?.avatarPath.orEmpty(),
+                    state = TaskState.DONE, detail = decision.reason.take(800), sourceRule = rule.id, noticeOnly = true)
+                store.put(notice)
+                TaskNotices.publish(applicationContext, notice)
+            }
+            store.rule(stillEnabled.copy(status = when {
+                decision.contact && decision.offerFileTask -> "已发送整理建议，等待你确认"
+                decision.contact -> "已发送提醒，没有读取文件"
+                else -> "本次无需打扰"
+            }))
             Result.success()
         } catch (e: kotlinx.coroutines.CancellationException) { throw e
         } catch (_: Exception) {

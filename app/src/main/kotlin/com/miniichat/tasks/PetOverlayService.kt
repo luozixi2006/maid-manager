@@ -121,7 +121,7 @@ class PetOverlayService : Service() {
             background = GradientDrawable().apply { cornerRadius = dp(24).toFloat(); setColor(Color.LTGRAY) }
         }
         panel.addView(avatarView)
-        panel.addView(label(if (chatting) "正在思考" else task?.state?.label ?: "空闲", 11).apply { gravity = Gravity.CENTER })
+        panel.addView(label(if (chatting) "正在思考" else task?.statusLabel ?: "空闲", 11).apply { gravity = Gravity.CENTER })
         attachDrag(avatarView)
         if (expanded) {
             if (shortcut) {

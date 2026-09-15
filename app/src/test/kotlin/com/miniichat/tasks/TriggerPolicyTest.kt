@@ -4,6 +4,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TriggerPolicyTest {
+    @Test fun ordinaryContactDefaultsToNoticeNotFileTask() {
+        val decision = taskJson.decodeFromString<EventDecision>("{\"contact\":true,\"reason\":\"该休息一下了\"}")
+        assertTrue(decision.contact)
+        assertFalse(decision.offerFileTask)
+    }
     @Test fun initialSnapshotNeverSpams() {
         assertFalse(TriggerPolicy.changed(TriggerKind.FILES, "", "school.pdf:100:200"))
         assertFalse(TriggerPolicy.changed(TriggerKind.CHARGING, "", "on"))
