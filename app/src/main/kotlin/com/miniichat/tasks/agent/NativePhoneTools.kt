@@ -20,6 +20,7 @@ object NativePhoneTools {
         "open_app" -> {
             val pkg = step.arguments["package"].orEmpty()
             require(AgentPolicy.validPackage(pkg)) { "不能由模型打开系统权限或安装界面" }
+            require(pkg in task.allowedPackages && pkg in TaskActions.preferences(context).getStringSet("agent_apps", emptySet()).orEmpty()) { "请先在工作权限中授权此应用" }
             require(pkg in apps(context)) { "应用不存在或不可启动" }
             context.packageManager.getLaunchIntentForPackage(pkg) ?: error("无法打开应用")
         }
@@ -57,8 +58,16 @@ object NativePhoneTools {
             check(pkg in task.allowedPackages && pkg in TaskActions.preferences(context).getStringSet("agent_apps", emptySet()).orEmpty()) { "应用没有获得任务授权" }
             NotificationAccess.read(pkg)
         }
-        "open_app", "open_url", "share_file", "calendar_event" -> throw HandOff("请点“打开系统操作”在前台执行；分享收件人、日程保存由你确认")
-        "read_screen", "tap", "type_text", "scroll", "back", "home" -> withContext(Dispatchers.Main) {
+        "open_app" -> withContext(Dispatchers.Main) {
+            val launch = intent(context, task, step).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val service = PhoneAccessibility.current
+            check(com.miniichat.proactive.AppVisibility.isForeground || service != null || CompanionRuntime.running.value) { "请打开工作区或悬浮窗后继续，系统不允许隐藏启动应用" }
+            (service ?: context).startActivity(launch)
+            kotlinx.coroutines.delay(1500)
+            "已请求系统打开${step.arguments["package"]}；下一步必须read_screen确认实际页面，再搜索或操作。"
+        }
+        "open_url", "share_file", "calendar_event" -> throw HandOff("请点“打开系统操作”在前台执行；分享收件人、日程保存由你确认")
+        "read_screen", "tap", "type_text", "submit_search", "scroll", "back", "home" -> withContext(Dispatchers.Main) {
             (PhoneAccessibility.current ?: throw NeedsPermission("accessibility", "需要开启无障碍服务；仅控制任务授权的应用" )).execute(task, step)
         }
         else -> error("原生工具未实现")

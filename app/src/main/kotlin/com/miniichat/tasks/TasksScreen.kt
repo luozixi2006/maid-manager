@@ -16,7 +16,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -32,20 +31,11 @@ fun TasksScreen(onBack: () -> Unit, onPersona: () -> Unit = {}) {
     val context = LocalContext.current
     val store = remember { TaskStore.of(context) }
     val revision by store.revision.collectAsState()
-    val draft by TaskNavigation.chatDraft.collectAsState()
     var tasks by remember { mutableStateOf(emptyList<PhoneTask>()) }
     var rules by remember { mutableStateOf(emptyList<TriggerRule>()) }
-    var goal by rememberSaveable { mutableStateOf(draft) }
-    var scopePath by rememberSaveable { mutableStateOf("") }
-    var rootDirectory by rememberSaveable { mutableStateOf(FolderSelection.saved(context)) }
-    var choosingFolder by remember { mutableStateOf(false) }
-    var browsingPath by remember { mutableStateOf(rootDirectory) }
     var eventFolder by rememberSaveable { mutableStateOf(FolderSelection.saved(context)) }
     var choosingEventFolder by remember { mutableStateOf(false) }
-    var consent by rememberSaveable { mutableStateOf(false) }
-    var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
-    var selected by rememberSaveable { mutableStateOf<String?>(null) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var refresh by remember { mutableIntStateOf(0) }
     val openCompanion by TaskNavigation.companion.collectAsState()
@@ -53,7 +43,6 @@ fun TasksScreen(onBack: () -> Unit, onPersona: () -> Unit = {}) {
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(revision) { withContext(Dispatchers.IO) { store.all() to store.rules() }.let { tasks = it.first; rules = it.second } }
-    LaunchedEffect(draft) { if (draft.isNotBlank()) { goal = draft; TaskNavigation.chatDraft.value = "" } }
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) {
             refresh++; scope.launch(Dispatchers.IO) { TaskActions.recover(context) }
@@ -69,6 +58,7 @@ fun TasksScreen(onBack: () -> Unit, onPersona: () -> Unit = {}) {
     }
     fun grantTaskPermission(kind: String) {
         when (kind) {
+            "apps" -> { tab = 0; message = "请在“允许操作的应用”里选择应用；已有任务可点“应用到未完成任务”。" }
             "files" -> if (Build.VERSION.SDK_INT >= 30) settings(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, true)
                 else runtime.launch(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE))
             "accessibility" -> settings(Settings.ACTION_ACCESSIBILITY_SETTINGS)
@@ -80,37 +70,19 @@ fun TasksScreen(onBack: () -> Unit, onPersona: () -> Unit = {}) {
     LaunchedEffect(requestedPermission) { if (requestedPermission.isNotBlank()) {
         grantTaskPermission(requestedPermission); TaskNavigation.permission.value = ""
     } }
-    fun returnToApprovedApp(task: PhoneTask) {
-        val step = task.steps.getOrNull(task.cursor) ?: return
-        if (task.engineVersion < 2 || com.miniichat.tasks.agent.AgentPolicy.specs[step.tool]?.permission != "accessibility") return
-        val pkg = step.arguments["package"].orEmpty()
-        if (!com.miniichat.tasks.agent.AgentPolicy.validPackage(pkg) || pkg !in task.allowedPackages ||
-            pkg !in TaskActions.preferences(context).getStringSet("agent_apps", emptySet()).orEmpty()) return
-        runCatching { context.packageManager.getLaunchIntentForPackage(pkg)?.let(context::startActivity) }
-            .onFailure { message = "请手动切回目标应用，再从任务通知继续" }
-    }
     val filesGranted = remember(refresh) { DownloadsTools(context, "").permitted() }
-    val overlayGranted = remember(refresh) { Settings.canDrawOverlays(context) }
-    fun chooseFolder(forEvent: Boolean = false, initialPath: String = rootDirectory) {
-        if (!filesGranted) {
-            message = "请先在系统中允许文件访问，回来后点“选择文件夹”。不会扩大已创建任务的范围。"
-            if (Build.VERSION.SDK_INT >= 30) settings(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, true)
-            else runtime.launch(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE))
-        } else if (forEvent) choosingEventFolder = true else { browsingPath = initialPath; choosingFolder = true }
+    fun chooseEventFolder() {
+        if (!filesGranted) grantTaskPermission("files") else choosingEventFolder = true
     }
-    if (choosingFolder || choosingEventFolder) {
-        FolderPicker(if (choosingEventFolder) eventFolder else browsingPath,
-        { choosingFolder = false; choosingEventFolder = false }, { folder ->
-            if (choosingEventFolder) eventFolder = folder else { rootDirectory = folder; scopePath = ""; consent = false; FolderSelection.remember(context, folder) }
-            choosingFolder = false; choosingEventFolder = false
-        })
+    if (choosingEventFolder) {
+        FolderPicker(eventFolder, { choosingEventFolder = false }) { eventFolder = it; choosingEventFolder = false }
         return
     }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.statusBarsPadding()) {
-            SettingsTopBar("任务与陪伴", onBack)
+            SettingsTopBar("工作与陪伴设置", onBack)
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp).background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(14.dp)).padding(4.dp)) {
-                listOf("帮我办事", "屏幕陪伴", "事件提醒").forEachIndexed { index, text ->
+                listOf("工作权限", "屏幕陪伴", "事件提醒").forEachIndexed { index, text ->
                     TextButton(onClick = { tab = index }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.textButtonColors(containerColor = if (tab == index) MaterialTheme.colorScheme.surface else androidx.compose.ui.graphics.Color.Transparent,
                             contentColor = if (tab == index) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)) { Text(text) }
@@ -120,91 +92,8 @@ fun TasksScreen(onBack: () -> Unit, onPersona: () -> Unit = {}) {
                 if (message.isNotBlank()) { Text(message, color = MaterialTheme.colorScheme.error); TextButton(onClick = { message = "" }) { Text("知道了") } }
                 when (tab) {
                     0 -> {
-                        SectionHeading("有什么需要我做？")
-                        Text("整理文件、查资料、写文本或准备日程。需要你确认时会来问你。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        AppTextField(goal, { goal = it }, label = { Text("告诉我想做什么") }, placeholder = { Text("例如：按类型整理下载内容，保留所有原文件") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
-                        AppGroup {
-                            PreferenceRow("文件夹 · ${FolderSelection.label(rootDirectory)}", "自动记住选择 · 不需要手填英文路径") {
-                                TextButton({ chooseFolder() }) { Text("选择文件夹") }
-                            }
-                            Text("实际位置：$rootDirectory", Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Row { Checkbox(consent, { consent = it }); Text("允许读取所选目录，并将必要文字交给当前模型。页面与通知正文另行确认。", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        Button(modifier = Modifier.fillMaxWidth(), enabled = consent && goal.isNotBlank() && !busy, onClick = {
-                            busy = true; scope.launch {
-                                try { val task = withContext(Dispatchers.IO) { TaskActions.create(context, goal, scopePath.trim(), rootDirectory = rootDirectory.trim()) }
-                                    selected = task.id; goal = ""; consent = false
-                                } catch (e: Exception) { message = e.message?.take(200) ?: "任务创建失败" }
-                                finally { busy = false }
-                            }
-                        }) { Text(if (busy) "正在保存…" else "交给我做") }
-                        SectionHeading("最近任务")
-                        if (tasks.isEmpty()) Text("还没有任务，交给我第一件事吧。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        tasks.forEach { task ->
-                            AppGroup {
-                                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                        Text(task.goal, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                                        TextButton(onClick = { selected = if (selected == task.id) null else task.id }) { Text(if (selected == task.id) "收起" else "查看") }
-                                    }
-                                    Text(if (task.noticeOnly) "事件提醒 · 没有读取文件" else "${task.state.label} · 已完成 ${task.cursor} 步 · ${FolderSelection.label(task.rootDirectory + if (task.scope.isBlank()) "" else "/${task.scope}")}", style = MaterialTheme.typography.labelMedium)
-                                    val createdFolders = task.steps.filter { it.tool == "mkdir" && it.done }.map { it.resolvedTarget.ifBlank { it.destination } }.filter { it.isNotBlank() }.distinct()
-                                    if (createdFolders.isNotEmpty()) Disclosure("打开本次创建的文件夹 · ${createdFolders.size}") {
-                                        createdFolders.forEach { relative ->
-                                            val actual = listOf(task.rootDirectory, task.scope, relative).filter { it.isNotBlank() }.joinToString("/")
-                                            TextButton({ chooseFolder(initialPath = actual) }) { Text("打开：${FolderSelection.label(actual)}") }
-                                        }
-                                    }
-                                    if (selected != task.id) Text(task.detail, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                    if (selected == task.id) {
-                                    if (task.state in setOf(TaskState.APPROVAL, TaskState.QUESTION, TaskState.PERMISSION, TaskState.FAILED)) Text(task.detail, style = MaterialTheme.typography.bodyMedium)
-                                    else Text(task.detail, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-                                    when (task.state) {
-                                        TaskState.PERMISSION -> TextButton(onClick = { grantTaskPermission(task.neededPermission) }) { Text("开启所需权限") }
-                                        TaskState.APPROVAL -> {
-                                            TextButton(onClick = {
-                                                TaskActions.respond(context, task.id, "approve", token = task.approvalToken)
-                                                returnToApprovedApp(task)
-                                            }) { Text("允许一次") }
-                                            if (task.approvedSuggestion) {
-                                                if (task.engineVersion < 2 || task.steps.getOrNull(task.cursor)?.let { com.miniichat.tasks.agent.AgentPolicy.canRemember(it) } == true)
-                                                    TextButton(onClick = { TaskActions.respond(context, task.id, "always", token = task.approvalToken); returnToApprovedApp(task) }) { Text("此范围内同类操作以后自动允许") }
-                                                TextButton(onClick = { TaskActions.respond(context, task.id, "skip", token = task.approvalToken) }) { Text("跳过此步") }
-                                            }
-                                        }
-                                        TaskState.QUESTION -> {
-                                            if (task.engineVersion >= 2 && task.neededPermission == "handoff") TextButton(onClick = {
-                                                scope.launch { runCatching { com.miniichat.tasks.agent.AgentActions.launchSystem(context, task.id, task.approvalToken) }
-                                                    .onFailure { message = it.message ?: "无法打开系统操作" } }
-                                            }) { Text("打开系统操作") }
-                                            task.steps.getOrNull(task.cursor)?.options?.forEach { option ->
-                                                TextButton(onClick = { TaskActions.respond(context, task.id, "answer", option, task.approvalToken) }) { Text(option) }
-                                            }
-                                            var answer by rememberSaveable(task.id) { mutableStateOf("") }
-                                            AppTextField(answer, { answer = it }, label = { Text("也可以直接告诉我") })
-                                            TextButton(enabled = answer.isNotBlank(), onClick = { TaskActions.respond(context, task.id, "answer", answer, task.approvalToken) }) { Text("回答并继续") }
-                                        }
-                                        TaskState.FAILED, TaskState.PAUSED -> {
-                                            TextButton(onClick = { TaskActions.respond(context, task.id, "resume") }) { Text("从原步骤继续") }
-                                            if (task.state == TaskState.FAILED) TextButton(onClick = { TaskActions.respond(context, task.id, "skip", token = task.approvalToken) }) { Text("跳过未执行的这一步") }
-                                        }
-                                        else -> if (TaskActions.active(task.state)) TextButton(onClick = { TaskActions.respond(context, task.id, "pause") }) { Text("暂停") }
-                                    }
-                                    if (task.state !in setOf(TaskState.DONE, TaskState.CANCELLED)) TextButton(onClick = { TaskActions.respond(context, task.id, "cancel") }) { Text("取消后续操作") }
-                                    if (task.engineVersion >= 2 && task.state in setOf(TaskState.PERMISSION, TaskState.FAILED, TaskState.PAUSED)) TextButton(onClick = {
-                                        store.change(task.id) { it.copy(allowedPackages = TaskActions.preferences(context).getStringSet("agent_apps", emptySet()).orEmpty().toList()) }
-                                        message = "已把你在权限页选定的应用授权给此任务，可继续原任务"
-                                    }) { Text("更新此任务的应用授权") }
-                                    Disclosure("执行记录") {
-                                        Text(task.detail, style = MaterialTheme.typography.bodyMedium)
-                                        Text("模型：${task.model}\n服务在任务创建时锁定。", style = MaterialTheme.typography.bodySmall)
-                                        Text(task.history.joinToString("\n").ifBlank { "还没有执行操作" }, style = MaterialTheme.typography.bodySmall)
-                                    }
-                                    }
-                                }
-                            }
-                        }
-                        Disclosure("办事权限 · 需要时再开启") {
+                        Text("工作在主页面右侧。这里只管理可使用的应用与系统权限。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         SectionHeading("访问权限")
                         AppGroup {
                             PreferenceRow("文件访问", if (filesGranted) "已允许" else "需要时再开启") {
@@ -222,12 +111,31 @@ fun TasksScreen(onBack: () -> Unit, onPersona: () -> Unit = {}) {
                             PreferenceRow("通知访问") { TextButton(onClick = { settings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS) }) { Text("管理") } }
                         }
                         Disclosure("页面操作与数据使用") {
-                            Text("无障碍可读取页面、点击、滚动和输入。仅限下面选中的应用；页面和通知正文交给当前模型前需确认。密码页及系统授权页不操作，可随时撤销。", style = MaterialTheme.typography.bodySmall)
+                            Text("无障碍可读取页面、点击、滚动和输入。仅限下面选中的应用；每次确认或本任务自动允许后，必要页面文字交给当前模型。通知正文另行确认。密码页及系统授权页不操作，可随时撤销。", style = MaterialTheme.typography.bodySmall)
                         }
                         var allowedApps by remember(refresh) { mutableStateOf(TaskActions.preferences(context).getStringSet("agent_apps", emptySet()).orEmpty().toSet()) }
                         var appList by remember { mutableStateOf(emptyMap<String, String>()) }
                         LaunchedEffect(Unit) { appList = withContext(Dispatchers.IO) { com.miniichat.tasks.agent.NativePhoneTools.apps(context).filterKeys(com.miniichat.tasks.agent.AgentPolicy::validPackage) } }
+                        var confirmAllApps by remember { mutableStateOf(false) }
+                        if (confirmAllApps) AlertDialog(onDismissRequest = { confirmAllApps = false }, title = { Text("选择全部可操作应用？") },
+                            text = { Text("只选择可启动且非系统权限的应用。任务仍需要单独授权，系统权限不会自动开启。") },
+                            confirmButton = { TextButton({
+                                allowedApps = appList.keys.toSet()
+                                TaskActions.preferences(context).edit().putStringSet("agent_apps", allowedApps).apply()
+                                confirmAllApps = false
+                            }) { Text("全选") } }, dismissButton = { TextButton({ confirmAllApps = false }) { Text("取消") } })
                         Disclosure("允许操作的应用 · ${allowedApps.size}") {
+                            Row {
+                                TextButton({ confirmAllApps = true }, enabled = appList.isNotEmpty()) { Text("全选") }
+                                TextButton({ allowedApps = emptySet(); TaskActions.preferences(context).edit().putStringSet("agent_apps", emptySet()).apply() }) { Text("清空") }
+                            }
+                            Text("变更只影响新任务；撤销立即生效。旧任务要新增应用，请在下面更新授权。", style = MaterialTheme.typography.bodySmall)
+                            TextButton({
+                                tasks.filter { it.engineVersion >= 2 && it.state !in setOf(TaskState.DONE, TaskState.CANCELLED) }.forEach { task ->
+                                    store.change(task.id) { it.copy(allowedPackages = allowedApps.toList()) }
+                                }
+                                message = "已将当前选择应用更新到未完成的任务"
+                            }) { Text("应用到未完成任务") }
                             AppGroup {
                                 appList.toList().sortedBy { it.second }.forEach { (pkg, label) ->
                                     PreferenceRow(label) { Checkbox(pkg in allowedApps, { yes ->
@@ -305,7 +213,7 @@ fun TasksScreen(onBack: () -> Unit, onPersona: () -> Unit = {}) {
                         }
                         AppTextField(eventGoal, { eventGoal = it }, label = { Text("发生时怎么提醒我") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
                         if (kind == TriggerKind.FILES) {
-                            TextButton({ chooseFolder(true) }) { Text("观察目录：${FolderSelection.label(eventFolder)} · 更换") }
+                            TextButton({ chooseEventFolder() }) { Text("观察目录：${FolderSelection.label(eventFolder)} · 更换") }
                             Text("观察目录内新增文件，不限格式；首次只记录基线，不读取正文。", style = MaterialTheme.typography.bodySmall)
                         }
                         Text("开启后，事件类型和此规则会交给当前模型判断；通知正文不会上传。", style = MaterialTheme.typography.bodySmall)

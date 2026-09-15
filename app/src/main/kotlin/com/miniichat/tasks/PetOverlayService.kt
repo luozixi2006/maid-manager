@@ -52,6 +52,8 @@ class PetOverlayService : Service() {
     private var submitting = false
     private var pendingGoal = ""
     private var pendingFolder = ""
+    private var bulkTarget: PhoneTask? = null
+    private var pendingRoutine = false
     private var availableBottom = 0
     private var draft = ""
     private var dark = false
@@ -75,6 +77,7 @@ class PetOverlayService : Service() {
         else startForeground(4102, notification)
         wm = getSystemService(WindowManager::class.java)
         val prefs = TaskActions.preferences(this)
+        ScreenCompanion.enabled.value = false
         prefs.registerOnSharedPreferenceChangeListener(lookListener)
         CompanionRuntime.running.value = true
         params = WindowManager.LayoutParams(dp(80), WindowManager.LayoutParams.WRAP_CONTENT,
@@ -91,6 +94,16 @@ class PetOverlayService : Service() {
                 name = it.displayName; avatar = it.avatarPath.orEmpty()
             }
             render()
+            launch { ScreenCompanion.enabled.collect { observing ->
+                val pause = PendingIntent.getService(this@PetOverlayService, 43, Intent(this@PetOverlayService, PetOverlayService::class.java).setAction("pause_screen"), PendingIntent.FLAG_IMMUTABLE)
+                val notice = NotificationCompat.Builder(this@PetOverlayService, channel).setSmallIcon(android.R.drawable.ic_menu_info_details)
+                    .setContentTitle(if (observing) "页面陪伴已开启" else "陪伴已开启")
+                    .setContentText(if (observing) "按问候间隔读取已选应用的可见文字 · 可随时暂停" else "点按聊天 · 随时关闭")
+                    .setOngoing(true).addAction(0, "关闭悬浮头像", close)
+                if (observing) notice.addAction(0, "暂停页面陪伴", pause)
+                getSystemService(NotificationManager::class.java).notify(4102, notice.build())
+                render()
+            } }
             launch {
                 combine(SettingsRepository(this@PetOverlayService).settings, AssistantStore(this@PetOverlayService).assistantsFlow,
                     ConversationStore(this@PetOverlayService).conversationsFlow) { settings, assistants, chats -> Triple(settings, assistants, chats) }
@@ -137,6 +150,7 @@ class PetOverlayService : Service() {
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "close") stopSelf()
+        if (intent?.action == "pause_screen") ScreenCompanion.enabled.value = false
         return START_NOT_STICKY // Never secretly restart a user-dismissed overlay.
     }
     private fun render() {
@@ -150,7 +164,7 @@ class PetOverlayService : Service() {
         val panel = ui.column().apply { setPadding(dp(if (expanded) 12 else 6), dp(if (expanded) 12 else 6), dp(if (expanded) 12 else 6), dp(if (expanded) 12 else 6)) }
         val path = CompanionAppearance.resolve(CompanionAppearance.avatar(this), if (workMode) task?.avatarPath else null, avatar)
         val title = if (workMode) task?.characterName ?: name else name
-        val state = if (chatting) "正在回复" else if (workMode) task?.statusLabel ?: "可以交代一件事" else if (PetMessages.notice.value.isNotBlank()) "有话想和你说" else "陪着你"
+        val state = if (chatting) "正在回复" else if (workMode) task?.statusLabel ?: "可以交代一件事" else if (ScreenCompanion.enabled.value) "页面陪伴已开启" else if (PetMessages.notice.value.isNotBlank()) "有话想和你说" else "陪着你"
         if (!expanded) {
             val bubble = FrameLayout(this)
             val photo = ui.avatar(path, 52, title).apply { contentDescription = title + "，" + state + "，点按展开，长按菜单" }
@@ -167,7 +181,7 @@ class PetOverlayService : Service() {
             panel.addView(ui.header(title, state, path,
                 { expanded = false; shortcut = false; PetMessages.notice.value = ""; render() }, { stopSelf() }, { attachDrag(it, false) }))
             val tabs = ui.row().apply { gravity = Gravity.TOP }
-            listOf("聊天", "帮我办事").forEachIndexed { i, label ->
+            listOf("聊天", "工作").forEachIndexed { i, label ->
                 tabs.addView(ui.action(label, (i == 1) == workMode) { workMode = i == 1; shortcut = false; quickReply = ""; render() },
                     LinearLayout.LayoutParams(0, dp(44), 1f).apply { topMargin = dp(8); marginEnd = dp(4) })
             }
@@ -177,11 +191,23 @@ class PetOverlayService : Service() {
             if (shortcut) {
                 action("打开任务列表") { startActivity(TaskNotices.openIntent(this)) }
                 action("头像与权限设置") { TaskNavigation.companion.value = true; startActivity(TaskNotices.openIntent(this)) }
+                action("恢复窗口大小") { TaskActions.preferences(this).edit().remove("pet_width").remove("pet_height").apply(); render() }
             } else if (workMode) {
-                if (pendingGoal.isNotBlank()) {
+                if (bulkTarget != null) {
+                    val target = bulkTarget!!
+                    body.addView(ui.label("任务：${target.goal}", 13))
+                    body.addView(ui.label(com.miniichat.tasks.agent.RoutineApproval.explanation, 13))
+                    action("允许本任务常规操作", true) { respond(target, "allow_routine"); bulkTarget = null; render() }
+                    action("取消") { bulkTarget = null; render() }
+                } else if (pendingGoal.isNotBlank()) {
                     body.addView(ui.label("交给我：" + pendingGoal))
                     body.addView(ui.label("文件范围：" + FolderSelection.label(pendingFolder) + "。允许按需读取，并将必要文字发送给当前模型？", 13, true))
                     action(if (submitting) "正在保存…" else "允许并开始", true) { if (!submitting) submitTask() }
+                    body.addView(Switch(this).apply {
+                        text = "本任务常规操作自动允许"; setTextColor(ui.ink); isChecked = pendingRoutine
+                        setOnCheckedChangeListener { _, enabled -> pendingRoutine = enabled }
+                    })
+                    body.addView(ui.label(com.miniichat.tasks.agent.RoutineApproval.explanation, 11, true))
                     action("先不做") { if (!submitting) { pendingGoal = ""; render() } }
                 } else task?.let { t ->
                     body.addView(ui.label(t.goal, 15))
@@ -189,6 +215,7 @@ class PetOverlayService : Service() {
                     when (t.state) {
                         TaskState.APPROVAL -> {
                             action("允许一次", true) { respond(t, "approve") }
+                            if (t.engineVersion >= 2) action("本任务内自动允许") { bulkTarget = t; render() }
                             if (t.approvedSuggestion && (t.engineVersion < 2 || t.steps.getOrNull(t.cursor)?.let { com.miniichat.tasks.agent.AgentPolicy.canRemember(it) } == true))
                                 action("此范围内同类操作以后允许") { respond(t, "always") }
                             action("取消任务") { respond(t, "cancel") }
@@ -197,13 +224,26 @@ class PetOverlayService : Service() {
                             if (t.neededPermission == "handoff") action("打开系统操作", true) { startActivity(TaskNotices.openIntent(this)) }
                             t.steps.getOrNull(t.cursor)?.options?.forEach { option -> action(option) { TaskActions.respond(this, t.id, "answer", option, t.approvalToken) } }
                         }
-                        TaskState.PERMISSION -> action("去系统授权", true) { TaskNavigation.permission.value = t.neededPermission; startActivity(TaskNotices.openIntent(this)) }
+                        TaskState.PERMISSION -> if (t.neededPermission == "file_consent") action("允许读取此目录并继续", true) { respond(t, "allow_files") }
+                            else action("去系统授权", true) { TaskNavigation.permission.value = t.neededPermission; startActivity(TaskNotices.openIntent(this)) }
                         TaskState.FAILED, TaskState.PAUSED -> action("继续", true) { respond(t, "resume") }
                         else -> if (TaskActions.active(t.state)) action("暂停") { respond(t, "pause") }
                     }
                 } ?: body.addView(ui.label("整理各种文件、查资料、写清单……直接告诉我。重要操作会先问你。"))
-                action("选择文件夹 / 更多权限") { startActivity(TaskNotices.openIntent(this)) }
+                action("工作权限设置") { TaskNavigation.permission.value = "apps"; startActivity(TaskNotices.openIntent(this)) }
             } else {
+                if (ScreenCompanion.enabled.value) {
+                    action("看看当前页面并和我说句话") { if (!chatting) {
+                        chatting = true; render()
+                        serviceScope.launch {
+                            try { quickReply = withContext(Dispatchers.IO) { ScreenCompanion.test(this@PetOverlayService, observe = true) } }
+                            catch (e: CancellationException) { throw e }
+                            catch (e: Exception) { quickReply = e.message?.take(180) ?: "当前页面暂时无法读取" }
+                            finally { chatting = false; render() }
+                        }
+                    } }
+                    action("暂停页面陪伴") { ScreenCompanion.enabled.value = false; render() }
+                }
                 val messages = conversation?.messages.orEmpty().takeLast(30)
                 if (messages.isEmpty()) body.addView(ui.label(PetMessages.notice.value.ifBlank { "我在，想聊点什么？" }))
                 messages.forEach { message ->
@@ -250,13 +290,16 @@ class PetOverlayService : Service() {
                 }
             }.apply { isEnabled = !chatting && !submitting }, LinearLayout.LayoutParams(dp(64), -2).apply { marginStart = dp(8) })
             panel.addView(footer, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+            val resize = ui.label("↘", 20, true).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; contentDescription = "调整悬浮窗大小"; tag = "resize" }
+            attachResize(resize)
+            panel.addView(resize, LinearLayout.LayoutParams(dp(48), dp(28)).apply { gravity = Gravity.END })
             // Keep the fixed input footer above the IME; the conversation alone scrolls.
             androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(panel) { _, insets ->
                 val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
                 val ime = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime()).bottom
                 availableBottom = resources.displayMetrics.heightPixels - maxOf(ime, bars.bottom)
                 val available = resources.displayMetrics.heightPixels - maxOf(ime, bars.bottom) - bars.top - dp(16)
-                val height = minOf(dp(560), available).coerceAtLeast(dp(160))
+                val height = OverlaySizing.fit(dp(TaskActions.preferences(this).getInt("pet_height", 560)), dp(330), available)
                 if (view === panel && expanded && params.height != height) {
                     params.height = height
                     params.y = params.y.coerceIn(bars.top, maxOf(bars.top, available - height + bars.top))
@@ -267,8 +310,8 @@ class PetOverlayService : Service() {
         }
         if (old != null) runCatching { wm.removeView(old) }
         view = panel
-        params.width = if (expanded) minOf(dp(360), resources.displayMetrics.widthPixels - dp(24)) else dp(64)
-        params.height = if (expanded) { if (focused && previousHeight > 0) previousHeight else minOf(dp(560), resources.displayMetrics.heightPixels - dp(64)) } else WindowManager.LayoutParams.WRAP_CONTENT
+        params.width = if (expanded) OverlaySizing.fit(dp(TaskActions.preferences(this).getInt("pet_width", 360)), dp(280), resources.displayMetrics.widthPixels - dp(24)) else dp(64)
+        params.height = if (expanded) { if (focused && previousHeight > 0) previousHeight else OverlaySizing.fit(dp(TaskActions.preferences(this).getInt("pet_height", 560)), dp(330), resources.displayMetrics.heightPixels - dp(64)) } else WindowManager.LayoutParams.WRAP_CONTENT
         params.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or if (expanded && focused) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         val estimatedHeight = if (expanded) params.height else dp(64)
@@ -282,7 +325,7 @@ class PetOverlayService : Service() {
         submitting = true; render()
         serviceScope.launch {
             try {
-                val created = withContext(Dispatchers.IO) { TaskActions.create(this@PetOverlayService, goal, rootDirectory = folder) }
+                val created = withContext(Dispatchers.IO) { TaskActions.create(this@PetOverlayService, goal, rootDirectory = folder, autoAllowRoutine = pendingRoutine) }
                 task = created; pendingGoal = ""; quickReply = "已保存，会在后台继续；需要确认时来问你。"
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) { quickReply = e.message?.take(150) ?: "暂时无法创建任务" }
@@ -312,6 +355,27 @@ class PetOverlayService : Service() {
             }; true
         }
     }
+    private fun attachResize(handle: View) {
+        var startX = 0f; var startY = 0f; var width = 0; var height = 0
+        handle.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { startX = event.rawX; startY = event.rawY; width = params.width; height = params.height }
+                MotionEvent.ACTION_MOVE -> {
+                    val bottom = if (availableBottom > 0) availableBottom else resources.displayMetrics.heightPixels - dp(24)
+                    params.width = OverlaySizing.fit(width + (event.rawX - startX).toInt(), dp(280), resources.displayMetrics.widthPixels - params.x - dp(12))
+                    params.height = OverlaySizing.fit(height + (event.rawY - startY).toInt(), dp(330), bottom - params.y - dp(12))
+                    view?.let { runCatching { wm.updateViewLayout(it, params) } }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    val density = resources.displayMetrics.density
+                    TaskActions.preferences(this).edit().putInt("pet_width", (params.width / density).toInt())
+                        .putInt("pet_height", (params.height / density).toInt()).apply()
+                    handle.performClick()
+                }
+            }
+            true
+        }
+    }
     private fun chat(text: String) {
         chatting = true; quickReply = "正在回复…"; render()
         serviceScope.launch {
@@ -337,6 +401,7 @@ class PetOverlayService : Service() {
     override fun onDestroy() {
         destroyed = true
         CompanionRuntime.running.value = false
+        ScreenCompanion.enabled.value = false
         TaskActions.preferences(this).unregisterOnSharedPreferenceChangeListener(lookListener)
         serviceScope.cancel(); view?.let { runCatching { wm.removeView(it) } }; view = null
         super.onDestroy()

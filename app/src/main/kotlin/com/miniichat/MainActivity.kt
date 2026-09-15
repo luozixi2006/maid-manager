@@ -88,8 +88,10 @@ class MainActivity : ComponentActivity() {
 
     private fun handleProactiveIntent(intent: Intent?) {
         if (intent?.getBooleanExtra("phone_tasks", false) == true) {
+            com.miniichat.tasks.TaskNavigation.selectedTask.value = intent.getStringExtra("work_task_id").orEmpty()
             com.miniichat.tasks.TaskNavigation.open.value = true
             intent.removeExtra("phone_tasks")
+            intent.removeExtra("work_task_id")
         }
         val source = intent?.getStringExtra(ProactiveNotifications.EXTRA_SOURCE).orEmpty()
         if (source != "normal") return

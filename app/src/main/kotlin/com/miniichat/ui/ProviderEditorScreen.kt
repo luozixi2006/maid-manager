@@ -40,14 +40,14 @@ fun ProviderEditorScreen(
 ) {
     var name by remember(initial?.id) { mutableStateOf(initial?.name ?: "自定义服务") }
     var baseUrl by remember(initial?.id) {
-        mutableStateOf(initial?.baseUrl ?: "https://api.deepseek.com")
+        mutableStateOf(initial?.baseUrl ?: "")
     }
     var apiKey by remember(initial?.id) { mutableStateOf(initial?.apiKey ?: "") }
     var requiresKey by remember(initial?.id) {
         mutableStateOf(initial?.authMode != ProviderAuthMode.NONE)
     }
     var modelId by remember(initial?.id) {
-        mutableStateOf(initial?.models?.firstOrNull() ?: "deepseek-v4-flash")
+        mutableStateOf(initial?.models?.firstOrNull() ?: "")
     }
     var fallbackModels by remember(initial?.id) {
         mutableStateOf(initial?.fallbackModels?.joinToString(", ").orEmpty())
@@ -84,7 +84,7 @@ fun ProviderEditorScreen(
                 onValueChange = { baseUrl = it; validation = null },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.setting_base_url)) },
-                placeholder = { Text("https://api.deepseek.com") },
+                placeholder = { Text("填写所选服务的兼容 API 地址") },
                 singleLine = true,
                 isError = validation != null,
                 supportingText = validation?.let { message -> ({ Text(message) }) }

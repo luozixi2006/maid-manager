@@ -27,7 +27,8 @@ object TaskActions {
     fun automatic(context: Context, task: PhoneTask, tool: String): Boolean =
         preferences(context).getBoolean("approve:${task.scope}:$tool", false)
     suspend fun create(context: Context, goal: String, scope: String = "", suggestion: Boolean = false,
-                       ruleId: String = "", rootDirectory: String = "Download"): PhoneTask {
+                       ruleId: String = "", rootDirectory: String = "Download", autoAllowRoutine: Boolean = false,
+                       fileConsent: Boolean = true): PhoneTask {
         require(goal.isNotBlank() && goal.length <= 4000) { "请简要描述要完成的事情（最多 4000 字）" }
         ToolPolicy.relative(scope, true)
         ToolPolicy.relative(rootDirectory)
@@ -38,7 +39,7 @@ object TaskActions {
         check(provider.authMode == ProviderAuthMode.NONE || provider.apiKey.isNotBlank()) { "请先配置当前服务的 API 密钥" }
         val assistant = AssistantStore(context).snapshot().firstOrNull { it.id == settings.activeAssistantId }
         val task = PhoneTask(goal = goal.trim(), scope = scope.trim(), providerId = provider.id,
-            engineVersion = 2, rootDirectory = rootDirectory,
+            engineVersion = 2, rootDirectory = rootDirectory, autoAllowRoutine = autoAllowRoutine, fileConsent = fileConsent,
             allowedPackages = preferences(context).getStringSet("agent_apps", emptySet()).orEmpty().toList(),
             providerEndpoint = provider.baseUrl, model = settings.activeModel,
             characterName = assistant?.displayName ?: "女仆", avatarPath = assistant?.avatarPath.orEmpty(), personaPrompt = assistant?.systemPrompt.orEmpty(),
@@ -53,6 +54,20 @@ object TaskActions {
         val request = OneTimeWorkRequestBuilder<PhoneTaskWorker>().setInputData(workDataOf("task" to id))
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
         WorkManager.getInstance(context).enqueueUniqueWork("phone-task-$id", ExistingWorkPolicy.KEEP, request)
+    }
+    fun addInstruction(context: Context, id: String, text: String) {
+        require(text.isNotBlank() && text.length <= 4000) { "补充内容最多4000字" }
+        val store = TaskStore.of(context)
+        synchronized(store) {
+            val task = store.get(id) ?: error("工作已不存在")
+            check(task.state != TaskState.CANCELLED) { "工作已停止，请新建" }
+            val restart = task.state == TaskState.DONE
+            store.put(task.copy(answers = (task.answers + "用户补充：$text").takeLast(40),
+                state = if (restart) TaskState.QUEUED else task.state,
+                steps = if (restart) task.steps.take(task.cursor) else task.steps,
+                detail = if (restart) "根据你的补充继续工作" else task.detail))
+            if (restart) resumeAfterCurrent(context, id)
+        }
     }
     fun recover(context: Context) {
         TaskStore.of(context).all().filter { active(it.state) || it.state == TaskState.PERMISSION }.forEach {

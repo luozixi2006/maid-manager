@@ -5,9 +5,15 @@ import java.util.TimeZone
 import kotlin.math.roundToLong
 
 object ProactivePolicy {
-    const val GLOBAL_THROTTLE_MILLIS = 60L * 60L * 1000L
+    const val GLOBAL_THROTTLE_MILLIS = 15L * 60L * 1000L
     const val RECENT_USER_ACTIVITY_MILLIS = 30L * 60L * 1000L
     fun initialDelayMillis(randomUnit: Double) = ((5 + 10 * randomUnit.coerceIn(0.0, 1.0)) * 60_000).roundToLong()
+    fun personaDelay(assistant: com.miniichat.data.Assistant, random: Double, tendency: Double? = null, failure: Int = 0): Long {
+        if (assistant.proactiveTiming == "persona") return nextDelayMillis("persona", random, tendency, failure)
+        val minimum = assistant.proactiveMinMinutes.coerceIn(15, 1440)
+        val maximum = if (assistant.proactiveTiming == "fixed") minimum else assistant.proactiveMaxMinutes.coerceIn(minimum, 1440)
+        return ((minimum + (maximum - minimum) * random.coerceIn(0.0, 1.0)) * 60_000L * (1 + failure.coerceIn(0, 4))).roundToLong()
+    }
 
     fun nextDelayMillis(
         frequency: String,

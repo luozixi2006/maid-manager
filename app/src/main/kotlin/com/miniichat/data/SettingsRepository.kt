@@ -16,8 +16,8 @@ import kotlinx.coroutines.flow.map
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
 data class AppSettings(
-    val activeProviderId: String = "deepseek",
-    val activeModel: String = "deepseek-v4-flash",
+    val activeProviderId: String = "",
+    val activeModel: String = "",
     val activeAssistantId: String = "default",
     val systemPrompt: String = "You are a helpful assistant.",
     val temperature: Float = 0.7f,
@@ -85,8 +85,8 @@ class SettingsRepository(private val context: Context) {
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p -> read(p) }
 
     private fun read(p: Preferences) = AppSettings(
-        activeProviderId = p[Keys.PROVIDER] ?: "deepseek",
-        activeModel = p[Keys.MODEL] ?: "deepseek-v4-flash",
+        activeProviderId = p[Keys.PROVIDER] ?: "",
+        activeModel = p[Keys.MODEL] ?: "",
         activeAssistantId = p[Keys.ASSISTANT] ?: "default",
         systemPrompt = p[Keys.SYSTEM] ?: "You are a helpful assistant.",
         temperature = p[Keys.TEMP] ?: 0.7f,

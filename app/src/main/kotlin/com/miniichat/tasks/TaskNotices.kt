@@ -18,6 +18,7 @@ object TaskNavigation {
     val companion = MutableStateFlow(false)
     val open = MutableStateFlow(false)
     val chatDraft = MutableStateFlow("")
+    val selectedTask = MutableStateFlow("")
 }
 
 object TaskNotices {
@@ -28,7 +29,7 @@ object TaskNotices {
         val channel = "phone_tasks"
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(channel, "后台任务与确认", NotificationManager.IMPORTANCE_HIGH))
-        val open = PendingIntent.getActivity(context, task.id.hashCode(), openIntent(context),
+        val open = PendingIntent.getActivity(context, task.id.hashCode(), openIntent(context).putExtra("work_task_id", task.id),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val builder = NotificationCompat.Builder(context, channel)
             .setSmallIcon(android.R.drawable.ic_menu_agenda).setContentTitle("${task.characterName} · ${task.statusLabel}")

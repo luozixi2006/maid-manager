@@ -62,7 +62,7 @@ class FloatingWindowTest {
             // Inspect the synthetic IME insets synchronously. Robolectric has no actual keyboard;
             // idling WindowManager would dispatch its real (empty) insets again.
             capture("floating-chat-keyboard")
-            val footer = panel.getChildAt(panel.childCount - 1)
+            val footer = panel.getChildAt(panel.childCount - 2)
             assertTrue(footer.bottom <= panel.height)
             assertTrue(footer.height >= 44)
             assertTrue(params.height < 1120)
@@ -78,7 +78,19 @@ class FloatingWindowTest {
             assertSame(panel, field("view").get(service))
             assertTrue(field("expanded").getBoolean(service))
             assertTrue(all(panel).any { it.contentDescription == "拖动悬浮窗口" })
-            all(panel).filterIsInstance<TextView>().first { it.text.toString() == "帮我办事" }.performClick()
+            val resize = panel.findViewWithTag<View>("resize")
+            val originalWidth = params.width
+            input.setText("调整大小后保留输入")
+            resize.dispatchTouchEvent(MotionEvent.obtain(2, 2, MotionEvent.ACTION_DOWN, 20f, 20f, 0))
+            resize.dispatchTouchEvent(MotionEvent.obtain(2, 25, MotionEvent.ACTION_MOVE, -100f, -40f, 0))
+            resize.dispatchTouchEvent(MotionEvent.obtain(2, 35, MotionEvent.ACTION_UP, -100f, -40f, 0))
+            assertTrue(params.width < originalWidth)
+            assertSame(panel, field("view").get(service))
+            assertEquals("调整大小后保留输入", input.text.toString())
+            capture("floating-resized")
+            assertTrue(footer.bottom <= panel.height)
+            assertTrue(TaskActions.preferences(service).getInt("pet_width", 0) > 0)
+            all(panel).filterIsInstance<TextView>().first { it.text.toString() == "工作" }.performClick()
             assertTrue(field("workMode").getBoolean(service))
         } finally {
             field("destroyed").setBoolean(service, true)

@@ -28,7 +28,8 @@ object ProactiveScheduler {
             if (assistant.canContact(settings.proactiveMessagesEnabled) && assistant.nextProactiveCheckAt <= 0L) {
                 assistantsChanged = true
                 assistant.copy(
-                    nextProactiveCheckAt = now + ProactivePolicy.initialDelayMillis(Random.nextDouble())
+                    nextProactiveCheckAt = now + if (assistant.proactiveTiming == "persona") ProactivePolicy.initialDelayMillis(Random.nextDouble())
+                        else ProactivePolicy.personaDelay(assistant, Random.nextDouble())
                 )
             } else assistant
         }

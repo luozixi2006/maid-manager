@@ -44,6 +44,8 @@ data class PhoneTask(
     val noticeOnly: Boolean = false,
     val engineVersion: Int = 1, val rootDirectory: String = "Download",
     val allowedPackages: List<String> = emptyList(), val neededPermission: String = "",
+    val autoAllowRoutine: Boolean = false,
+    val fileConsent: Boolean = true,
     val observations: List<String> = emptyList(), val rounds: Int = 0,
     val goalSummary: String = "", val consecutiveErrors: Int = 0,
     val createdAt: Long = System.currentTimeMillis(), val updatedAt: Long = createdAt

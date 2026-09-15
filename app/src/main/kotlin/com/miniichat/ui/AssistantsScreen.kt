@@ -35,6 +35,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -190,6 +192,13 @@ private fun PersonaEditorDialog(
         onError = onPhotoError)
     var prompt by rememberSaveable(initial?.id) { mutableStateOf(initial?.systemPrompt ?: "") }
     var proactiveEnabled by rememberSaveable(initial?.id) { mutableStateOf(initial?.canContact(legacyProactiveEnabled) ?: false) }
+    var timing by rememberSaveable(initial?.id) { mutableStateOf(initial?.proactiveTiming ?: "persona") }
+    var minimum by rememberSaveable(initial?.id) { mutableStateOf((initial?.proactiveMinMinutes ?: 60).toString()) }
+    var maximum by rememberSaveable(initial?.id) { mutableStateOf((initial?.proactiveMaxMinutes ?: 240).toString()) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val testScope = rememberCoroutineScope()
+    var testing by remember { mutableStateOf(false) }
+    var testResult by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -251,6 +260,26 @@ private fun PersonaEditorDialog(
                     )
                 }
                 Text("依照人设和最近聊天来问候、分享话题，不用配置任务规则。开启后会按需调用当前模型；未回复时不连发。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (proactiveEnabled) {
+                    Row { listOf("persona" to "随人设", "fixed" to "固定间隔", "random" to "随机间隔").forEach { (key, label) ->
+                        TextButton({ timing = key }) { Text(if (timing == key) "✓ $label" else label) }
+                    } }
+                    if (timing != "persona") {
+                        AppTextField(minimum, { minimum = it.filter(Char::isDigit).take(4) }, label = { Text(if (timing == "fixed") "间隔分钟（15–1440）" else "最短间隔分钟") })
+                        if (timing == "random") AppTextField(maximum, { maximum = it.filter(Char::isDigit).take(4) }, label = { Text("最长间隔分钟（最多1440）") })
+                    }
+                    Text("这是尝试联系的间隔，受系统后台调度、安静时段和未回复防打扰影响，不保证准点发消息。", style = MaterialTheme.typography.bodySmall)
+                }
+                TextButton(enabled = initial != null && !testing, onClick = {
+                    testing = true; testResult = ""
+                    testScope.launch {
+                        try { testResult = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.miniichat.tasks.ScreenCompanion.test(context, initial!!.id) } }
+                        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                        catch (e: Exception) { testResult = e.message?.take(160) ?: "测试未成功，请检查模型服务" }
+                        finally { testing = false }
+                    }
+                }) { Text(if (testing) "正在生成问候…" else "测试一次问候（使用已保存人设）") }
+                if (testResult.isNotBlank()) Text(testResult, style = MaterialTheme.typography.bodySmall)
             }
         },
         confirmButton = {
@@ -263,7 +292,10 @@ private fun PersonaEditorDialog(
                         systemPrompt = prompt.trim(),
                         proactiveEnabled = proactiveEnabled,
                         proactiveConsentVersion = 1,
-                        nextProactiveCheckAt = if (proactiveEnabled != initial?.canContact(legacyProactiveEnabled) || (initial?.proactiveConsentVersion ?: 0) < 1) 0L else initial?.nextProactiveCheckAt ?: 0L
+                        proactiveTiming = timing,
+                        proactiveMinMinutes = minimum.toIntOrNull()?.coerceIn(15, 1440) ?: 60,
+                        proactiveMaxMinutes = (maximum.toIntOrNull() ?: 240).coerceIn((minimum.toIntOrNull() ?: 60).coerceIn(15, 1440), 1440),
+                        nextProactiveCheckAt = if (proactiveEnabled != initial?.canContact(legacyProactiveEnabled) || (initial?.proactiveConsentVersion ?: 0) < 1 || timing != initial?.proactiveTiming || minimum.toIntOrNull() != initial?.proactiveMinMinutes || maximum.toIntOrNull() != initial?.proactiveMaxMinutes) 0L else initial?.nextProactiveCheckAt ?: 0L
                     )
                     onSave(value)
                 },

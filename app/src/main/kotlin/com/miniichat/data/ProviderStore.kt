@@ -21,18 +21,8 @@ class ProviderStore(private val context: Context) {
 
     val providersFlow: Flow<List<ProviderConfig>> =
         context.providersDataStore.data.map { prefs ->
-            val raw = prefs[key] ?: return@map listOf(defaultProvider())
-            runCatching { json.decodeFromString(serializer, raw) }
-                .getOrDefault(listOf(defaultProvider()))
+            read(prefs)
         }
-
-    private fun defaultProvider() = ProviderConfig(
-        id = "deepseek",
-        name = "DeepSeek",
-        baseUrl = "https://api.deepseek.com",
-        apiKey = "",
-        models = listOf("deepseek-v4-flash", "deepseek-v4-pro")
-    )
 
     suspend fun snapshot(): List<ProviderConfig> = providersFlow.first()
 
@@ -74,7 +64,7 @@ class ProviderStore(private val context: Context) {
         return updated
     }
 
-    private fun read(prefs: Preferences): List<ProviderConfig> = prefs[key]?.let { raw ->
+    internal fun read(prefs: Preferences): List<ProviderConfig> = prefs[key]?.let { raw ->
         runCatching { json.decodeFromString(serializer, raw) }.getOrNull()
-    } ?: listOf(defaultProvider())
+    } ?: emptyList()
 }

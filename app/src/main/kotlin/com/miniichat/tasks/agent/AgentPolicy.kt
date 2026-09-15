@@ -30,6 +30,7 @@ object AgentPolicy {
         ToolSpec("read_screen", "观察当前页面", Risk.CONFIRM, "accessibility", "package=任务授权应用；返回带屏幕快照ID和节点ID的可见结构，密码界面屏蔽"),
         ToolSpec("tap", "点击页面元素", Risk.CONFIRM, "accessibility", "package,node,snapshot=最近观察的精确标识；页面变化则拒绝点击"),
         ToolSpec("type_text", "输入文本", Risk.CONFIRM, "accessibility", "package,node,snapshot,text；不能操作密码字段"),
+        ToolSpec("submit_search", "提交搜索", Risk.CONFIRM, "accessibility", "package,node,snapshot=最近观察到的搜索输入框。Android 11以上调用输入框搜索动作；否则寻找真实搜索按钮点击。不用于消息发送。"),
         ToolSpec("scroll", "滚动页面", Risk.CHANGE, "accessibility", "package,node,snapshot,direction=forward/backward"),
         ToolSpec("back", "返回上页", Risk.CHANGE, "accessibility", "package=任务授权的当前应用"),
         ToolSpec("home", "返回桌面", Risk.CHANGE, "accessibility", "package=任务授权的当前应用"),
@@ -58,9 +59,24 @@ object AgentPolicy {
         name != "com.maidmanager.debug" && name != "com.android.settings" && name != "com.android.systemui" &&
         !name.contains("permissioncontroller") && !name.contains("packageinstaller")
     fun approvalKey(task: PhoneTask, step: PhoneStep) = "agent:${task.rootDirectory}/${task.scope}:${step.tool}:${step.arguments["package"].orEmpty()}"
+    fun confirmation(task: PhoneTask, step: PhoneStep): String = buildString {
+        append("准备${spec(step.tool).title}。\n")
+        if (step.reason.isNotBlank()) append(step.reason).append('\n')
+        if (step.source.isNotBlank()) append("来源：").append(step.source).append('\n')
+        if (step.destination.isNotBlank()) append("目标：").append(step.destination).append('\n')
+        if (step.arguments["package"].orEmpty().isNotBlank()) append("应用：").append(step.arguments["package"]).append('\n')
+        if (step.arguments["text"].orEmpty().isNotBlank()) append("内容：").append(step.arguments["text"]?.take(1200)).append('\n')
+        if (step.arguments["url"].orEmpty().isNotBlank()) append("网址：").append(step.arguments["url"]).append('\n')
+        if (step.tool == "calendar_event") append("日程：").append(step.arguments["title"]).append('\n')
+            .append("说明：").append(step.arguments["description"].orEmpty()).append('\n')
+            .append("起止时间：").append(step.arguments["start"]?.toLongOrNull()?.let { java.util.Date(it) }).append(" — ")
+            .append(step.arguments["end"]?.toLongOrNull()?.let { java.util.Date(it) }).append('\n')
+        append(targetDescription(task, step))
+        if (step.tool == "read_screen" || step.tool == "read_notifications") append("\n必要文字会交给本任务模型。")
+    }.trim()
     fun canRemember(step: PhoneStep): Boolean = step.tool in setOf("mkdir", "copy", "move", "rename", "write_text", "open_app", "scroll", "back", "home")
     fun requireFreshObservation(task: PhoneTask, step: PhoneStep) {
-        if (step.tool !in setOf("tap", "type_text", "scroll")) return
+        if (step.tool !in setOf("tap", "type_text", "scroll", "submit_search")) return
         val last = task.steps.take(task.cursor).lastOrNull { it.done && spec(it.tool).permission == "accessibility" }
         check(last?.tool == "read_screen") { "每次页面操作前必须重新观察，不复用旧页面" }
         val receipt = taskJson.parseToJsonElement(last.result).jsonObject
@@ -68,11 +84,13 @@ object AgentPolicy {
             receipt["package"]?.jsonPrimitive?.content == step.arguments["package"]) { "页面标识不是最近一次真实观察，已拒绝" }
     }
     fun targetDescription(task: PhoneTask, step: PhoneStep): String {
-        if (step.tool !in setOf("tap", "type_text", "scroll")) return ""
+        if (step.tool !in setOf("tap", "type_text", "scroll", "submit_search")) return ""
         val read = task.steps.take(task.cursor).lastOrNull { it.done && it.tool == "read_screen" } ?: return "尚无页面观察"
         return runCatching {
             val rows = taskJson.parseToJsonElement(read.result).jsonObject["nodes"]?.jsonPrimitive?.content.orEmpty()
-            "目标控件：" + (rows.lineSequence().firstOrNull { it.startsWith("${step.arguments["node"]}: ") } ?: "未找到可见控件，需要重新观察")
+            "目标控件：" + (rows.lineSequence().firstOrNull { it.startsWith("${step.arguments["node"]}: ") }
+                ?.substringAfter(": ")?.substringBefore(" clickable=")?.replace("text=", "")?.replace("desc=", " / ")?.replace("null", "")
+                ?: "未找到可见控件，需要重新观察")
         }.getOrDefault("观察记录不完整，需要重新观察")
     }
 }

@@ -4,6 +4,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -31,7 +34,7 @@ import kotlinx.coroutines.launch
 
 private enum class Screen {
     Chat, Settings, Providers, ProviderEdit, Assistants, Memories, TtsSettings, SearchSettings,
-    Appearance, About, ChatData, HandoffEditor, ProactiveMessages, ErrorCenter, Updates, Tasks
+    Appearance, About, ChatData, HandoffEditor, ProactiveMessages, ErrorCenter, Updates, Tasks, Work
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -60,6 +63,7 @@ fun AppRoot(vm: ChatViewModel) {
     androidx.activity.compose.BackHandler(enabled = screen == Screen.Settings) {
         screen = Screen.Chat
     }
+    androidx.activity.compose.BackHandler(enabled = screen == Screen.Work) { screen = Screen.Chat }
     androidx.activity.compose.BackHandler(enabled = screen == Screen.Providers) {
         screen = providersReturnScreen
     }
@@ -72,9 +76,10 @@ fun AppRoot(vm: ChatViewModel) {
     androidx.activity.compose.BackHandler(
         enabled = screen in setOf(
             Screen.Memories, Screen.TtsSettings, Screen.SearchSettings, Screen.Appearance, Screen.About,
-            Screen.ChatData, Screen.ProactiveMessages, Screen.ErrorCenter, Screen.Updates, Screen.Tasks
+            Screen.ChatData, Screen.ProactiveMessages, Screen.ErrorCenter, Screen.Updates
         )
     ) { screen = Screen.Settings }
+    androidx.activity.compose.BackHandler(enabled = screen == Screen.Tasks) { screen = Screen.Work }
     androidx.activity.compose.BackHandler(enabled = screen == Screen.HandoffEditor) {
         screen = handoffReturnScreen
     }
@@ -98,7 +103,7 @@ fun AppRoot(vm: ChatViewModel) {
     val proactiveNotice by ProactiveNavigation.foregroundNotice.collectAsState()
     val openTasks by com.miniichat.tasks.TaskNavigation.open.collectAsState()
     LaunchedEffect(openTasks) {
-        if (openTasks) { screen = Screen.Tasks; com.miniichat.tasks.TaskNavigation.open.value = false }
+        if (openTasks) { screen = if (com.miniichat.tasks.TaskNavigation.permission.value.isNotBlank() || com.miniichat.tasks.TaskNavigation.companion.value) Screen.Tasks else Screen.Work; com.miniichat.tasks.TaskNavigation.open.value = false }
     }
 
     val activeConv = conversations.firstOrNull { it.id == activeId }
@@ -136,6 +141,18 @@ fun AppRoot(vm: ChatViewModel) {
             .background(MaterialTheme.colorScheme.background)
             .then(if (screen != Screen.Chat) Modifier.navigationBarsPadding() else Modifier)
     ) {
+        Column(Modifier.fillMaxSize()) {
+        if (screen == Screen.Chat || screen == Screen.Work) {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = androidx.compose.ui.unit.Dp(20f))) {
+                listOf(Screen.Chat to "聊天", Screen.Work to "工作").forEach { (destination, label) ->
+                    TextButton(onClick = { screen = destination }, modifier = Modifier.weight(1f)) {
+                        Text(label, style = MaterialTheme.typography.titleMedium,
+                            color = if (screen == destination) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+        Box(Modifier.weight(1f).then(if (screen == Screen.Chat || screen == Screen.Work) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier)) {
         androidx.compose.animation.Crossfade(targetState = screen,
             animationSpec = androidx.compose.animation.core.tween(160), label = "page") { currentScreen ->
         screenState.SaveableStateProvider(currentScreen.name) {
@@ -195,7 +212,7 @@ fun AppRoot(vm: ChatViewModel) {
                         onOpenSettings = { screen = Screen.Settings },
                         onOpenTasks = { draft ->
                             com.miniichat.tasks.TaskNavigation.chatDraft.value = draft
-                            screen = Screen.Tasks
+                            screen = Screen.Work
                         },
                         onEditPersona = {
                             personaReturnScreen = Screen.Chat
@@ -389,11 +406,17 @@ fun AppRoot(vm: ChatViewModel) {
                     onInstall = updateVm::install
                 )
             }
-            Screen.Tasks -> com.miniichat.tasks.TasksScreen(onBack = { screen = Screen.Chat }, onPersona = {
+            Screen.Work -> com.miniichat.tasks.WorkScreen(onSettings = { screen = Screen.Tasks }, onModel = {
+                if (providers.isEmpty()) { providersReturnScreen = Screen.Work; editingProvider = null; screen = Screen.ProviderEdit }
+                else showModelPicker = true
+            }, model = settings.activeModel)
+            Screen.Tasks -> com.miniichat.tasks.TasksScreen(onBack = { screen = Screen.Work }, onPersona = {
                 personaReturnScreen = Screen.Tasks; personaToEdit = settings.activeAssistantId; screen = Screen.Assistants
             })
         }
 
+        }
+        }
         }
         }
         SnackbarHost(hostState = snackbar, modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter))

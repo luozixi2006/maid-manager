@@ -63,6 +63,20 @@ class UiVisualTest {
         compose.onNodeWithText("显示悬浮头像").assertExists()
         capture("companion-settings")
     }
+    @Test fun workIsConversationAndHistoryLivesInDrawer() {
+        compose.setContent { MaidManagerTheme("light", false) { WorkScreen({}, {}, "已选模型") } }
+        compose.onNodeWithText("想完成什么？").assertExists()
+        compose.onNodeWithText("最近任务").assertDoesNotExist()
+        capture("work-light")
+        compose.onNodeWithContentDescription("工作记录").performClick()
+        compose.onNodeWithText("新工作").assertExists()
+        capture("work-history")
+    }
+    @Test fun workDarkKeepsInputAndPermissionControlsVisible() {
+        compose.setContent { MaidManagerTheme("dark", false) { WorkScreen({}, {}, "已选模型") } }
+        compose.onNodeWithContentDescription("发送").assertExists()
+        capture("work-dark")
+    }
     @Test fun reasoningAndSourcesHaveSeparateContainers() {
         compose.setContent { MaidManagerTheme("dark", false) {
             androidx.compose.foundation.layout.Column {

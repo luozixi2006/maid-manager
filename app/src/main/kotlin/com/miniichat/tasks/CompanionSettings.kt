@@ -60,7 +60,8 @@ fun CompanionSettings(refresh: Int, openPermission: () -> Unit, onError: (String
             AppSwitch(popups, { popups = it; TaskActions.preferences(context).edit().putBoolean(CompanionAppearance.POPUPS, it).apply() })
         }
     }
-    Text("拖动靠边，点按聊天。展开后可直接收起或关闭。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text("顶部拖动位置，右下角拖动调整大小，文字自动换行。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    ScreenCompanionSettings(onError)
     Disclosure("关闭与隐私说明") {
         Text("关闭头像不会取消任务或人设消息，也不会自动重新打开。日常问候跟随人设；手机事件可到“事件提醒”单独关闭。聊天保存到历史记录；头像保存在本机。", style = MaterialTheme.typography.bodySmall)
     }
