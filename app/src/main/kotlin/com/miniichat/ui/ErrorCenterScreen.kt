@@ -32,7 +32,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -105,7 +104,7 @@ fun ErrorCenterScreen(
                     Icon(Icons.Outlined.FileDownload, contentDescription = null, Modifier.size(18.dp))
                     Text("  导出报告")
                 }
-                OutlinedButton(
+                FilledTonalButton(
                     modifier = Modifier.weight(1f),
                     onClick = { confirmClear = true }
                 ) {
@@ -189,8 +188,8 @@ private fun EmptyErrorCenter() {
 private fun ErrorHistoryItem(error: AppError, onClick: () -> Unit, onDelete: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(14.dp)
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(20.dp)
     ) {
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {

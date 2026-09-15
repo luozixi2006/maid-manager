@@ -95,7 +95,7 @@ fun InputBar(
         if (reasoningEnabled) enabledLabel else disabledLabel
     )
     Column(
-        modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
+        modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
             .padding(WindowInsets.navigationBars.asPaddingValues())
     ) {
         if (photos.isNotEmpty()) {

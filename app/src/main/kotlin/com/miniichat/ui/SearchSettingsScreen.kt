@@ -17,8 +17,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -85,7 +83,7 @@ fun SearchSettingsScreen(
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                text = "每次联网时会同时查询所有已启用且配置完整的搜索源，自动合并并去除重复结果，无需手动选择。单个来源失败不会中断其他来源。",
+                text = "启用多个来源，搜索时自动合并结果。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -129,7 +127,7 @@ private fun SearchSourceEditor(
     source: SearchSourceConfig,
     onChange: (SearchSourceConfig) -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    AppGroup {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -151,7 +149,7 @@ private fun SearchSourceEditor(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Switch(
+                AppSwitch(
                     checked = source.enabled,
                     onCheckedChange = { onChange(source.copy(enabled = it)) }
                 )
@@ -163,7 +161,7 @@ private fun SearchSourceEditor(
                 SearchSourceType.TAVILY -> ApiKeyField(source, onChange)
 
                 SearchSourceType.SEARXNG -> {
-                    OutlinedTextField(
+                    AppTextField(
                         value = source.baseUrl,
                         onValueChange = { onChange(source.copy(baseUrl = it)) },
                         modifier = Modifier.fillMaxWidth(),
@@ -175,7 +173,7 @@ private fun SearchSourceEditor(
                 }
 
                 SearchSourceType.CUSTOM -> {
-                    OutlinedTextField(
+                    AppTextField(
                         value = source.baseUrl,
                         onValueChange = { onChange(source.copy(baseUrl = it)) },
                         modifier = Modifier.fillMaxWidth(),
@@ -185,7 +183,7 @@ private fun SearchSourceEditor(
                         singleLine = true
                     )
                     ApiKeyField(source, onChange, optional = true)
-                    OutlinedTextField(
+                    AppTextField(
                         value = source.engine,
                         onValueChange = { onChange(source.copy(engine = it)) },
                         modifier = Modifier.fillMaxWidth(),
@@ -195,7 +193,7 @@ private fun SearchSourceEditor(
                 }
             }
 
-            when (source.type) {
+            Disclosure("官网与配置帮助") { when (source.type) {
                 SearchSourceType.BRAVE -> {
                     OfficialLink("Brave · 注册与 API 密钥", "https://brave.com/search/api/")
                     OfficialLink("Brave · 接口文档", "https://api-dashboard.search.brave.com/app/documentation/web-search/get-started")
@@ -206,6 +204,7 @@ private fun SearchSourceEditor(
                 }
                 SearchSourceType.SEARXNG -> OfficialLink("SearXNG · 部署与 JSON 搜索说明", "https://docs.searxng.org/")
                 SearchSourceType.CUSTOM -> OfficialLink("自定义搜索 · 本项目接口说明", "https://github.com/luozixi2006/maid-manager/blob/main/docs/SEARCH_API.md")
+            }
             }
 
             }
@@ -228,7 +227,7 @@ private fun ApiKeyField(
     onChange: (SearchSourceConfig) -> Unit,
     optional: Boolean = false
 ) {
-    OutlinedTextField(
+    AppTextField(
         value = source.apiKey,
         onValueChange = { onChange(source.copy(apiKey = it)) },
         modifier = Modifier.fillMaxWidth(),

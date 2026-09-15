@@ -28,9 +28,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -71,7 +69,7 @@ fun MemoryScreen(
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)
         ) {
-            ToggleSetting(
+            AppGroup { ToggleSetting(
                 title = stringResource(R.string.enable_memory),
                 subtitle = stringResource(R.string.enable_memory_hint),
                 checked = memoryEnabled,
@@ -84,6 +82,7 @@ fun MemoryScreen(
                 enabled = memoryEnabled,
                 onCheckedChange = onAutoMemoryChange
             )
+            }
             Spacer(Modifier.height(12.dp))
             Button(onClick = { creating = true }, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Add, contentDescription = null)
@@ -100,8 +99,8 @@ fun MemoryScreen(
             memories.forEach { memory ->
                 Surface(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(12.dp)
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(20.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
@@ -120,7 +119,7 @@ fun MemoryScreen(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        Switch(
+                        AppSwitch(
                             checked = memory.enabled,
                             onCheckedChange = { onItemEnabledChange(memory.id, it) }
                         )
@@ -189,7 +188,7 @@ private fun ToggleSetting(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+        AppSwitch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
     }
 }
 
@@ -208,7 +207,7 @@ private fun MemoryEditorDialog(
         text = {
             Column {
                 Box {
-                    OutlinedTextField(
+                    AppTextField(
                         value = category,
                         onValueChange = {},
                         modifier = Modifier.fillMaxWidth(),
@@ -233,7 +232,7 @@ private fun MemoryEditorDialog(
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
+                AppTextField(
                     value = content,
                     onValueChange = { content = it },
                     modifier = Modifier.fillMaxWidth(),

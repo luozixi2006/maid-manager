@@ -20,6 +20,7 @@ import com.miniichat.data.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
 import java.io.File
 
 object PetMessages {
@@ -43,6 +44,12 @@ class PetOverlayService : Service() {
     private var chatting = false
     private val quickHistory = mutableListOf<ChatMessage>()
     private var draft = ""
+    private var dark = false
+    private var destroyed = false
+    private var themeMode = "system"
+    private val lookListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == CompanionAppearance.AVATAR || key == CompanionAppearance.POPUPS) serviceScope.launch { render() }
+    }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onCreate() {
         super.onCreate()
@@ -52,12 +59,14 @@ class PetOverlayService : Service() {
             NotificationChannel(channel, "屏幕边缘陪伴", NotificationManager.IMPORTANCE_LOW))
         val close = PendingIntent.getService(this, 42, Intent(this, javaClass).setAction("close"), PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(this, channel).setSmallIcon(android.R.drawable.ic_menu_info_details)
-            .setContentTitle("屏幕边缘陪伴已开启").setContentText("可拖动头像；长按快捷操作。触发检测会消耗少量电量。")
+            .setContentTitle("陪伴已开启").setContentText("点按聊天 · 随时关闭")
             .setOngoing(true).addAction(0, "关闭悬浮头像", close).build()
         if (Build.VERSION.SDK_INT >= 34) startForeground(4102, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         else startForeground(4102, notification)
         wm = getSystemService(WindowManager::class.java)
         val prefs = TaskActions.preferences(this)
+        prefs.registerOnSharedPreferenceChangeListener(lookListener)
+        CompanionRuntime.running.value = true
         params = WindowManager.LayoutParams(dp(80), WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
@@ -67,10 +76,20 @@ class PetOverlayService : Service() {
             }
         serviceScope.launch {
             val settings = SettingsRepository(this@PetOverlayService).settings.first()
+            dark = settings.themeMode == "dark" || (settings.themeMode == "system" && resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES)
             AssistantStore(this@PetOverlayService).snapshot().firstOrNull { it.id == settings.activeAssistantId }?.let {
                 name = it.displayName; avatar = it.avatarPath.orEmpty()
             }
             render()
+            launch {
+                combine(SettingsRepository(this@PetOverlayService).settings, AssistantStore(this@PetOverlayService).assistantsFlow) { settings, assistants -> settings to assistants }
+                    .collect { (latest, assistants) ->
+                        themeMode = latest.themeMode
+                        dark = themeMode == "dark" || (themeMode == "system" && resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+                        assistants.firstOrNull { it.id == latest.activeAssistantId }?.let { name = it.displayName; avatar = it.avatarPath.orEmpty() }
+                        render()
+                    }
+            }
             launch { TaskStore.of(this@PetOverlayService).revision.collect {
                 val tasks = withContext(Dispatchers.IO) { TaskStore.of(this@PetOverlayService).all() }
                 val next = tasks.firstOrNull { it.state in setOf(TaskState.APPROVAL, TaskState.PERMISSION, TaskState.QUESTION, TaskState.FAILED) }
@@ -80,13 +99,13 @@ class PetOverlayService : Service() {
                 val t = task
                 if (t != null && t.state in setOf(TaskState.QUESTION, TaskState.APPROVAL, TaskState.PERMISSION, TaskState.DONE, TaskState.FAILED)) {
                     val alert = "${t.id}:${t.state}:${t.cursor}"
-                    if (lastAlert != alert && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
+                    if (lastAlert != alert && CompanionAppearance.popups(this@PetOverlayService) && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
                         lastAlert = alert; expanded = true
                     }
                 }
                 render()
             } }
-            launch { PetMessages.notice.collect { if (it.isNotBlank() && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
+            launch { PetMessages.notice.collect { if (it.isNotBlank() && CompanionAppearance.popups(this@PetOverlayService) && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
                 expanded = true; render()
             } } }
             launch { while (isActive) {
@@ -100,58 +119,73 @@ class PetOverlayService : Service() {
         return START_NOT_STICKY // Never secretly restart a user-dismissed overlay.
     }
     private fun render() {
+        if (destroyed) return
         if (!::wm.isInitialized || !Settings.canDrawOverlays(this)) { stopSelf(); return }
         val old = view
-        // Retain unsent text across live status refreshes.
         old?.findViewWithTag<EditText>("draft")?.let { draft = it.text.toString() }
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-            background = GradientDrawable().apply { setColor(Color.rgb(249, 248, 246)); cornerRadius = dp(18).toFloat(); setStroke(dp(1), Color.LTGRAY) }
-            elevation = dp(6).toFloat()
-        }
-        val avatarView = ImageView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply { gravity = Gravity.CENTER_HORIZONTAL }
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            val path = task?.avatarPath?.ifBlank { avatar } ?: avatar
-            if (path.isNotBlank() && File(path).isFile) setImageBitmap(BitmapFactory.decodeFile(path))
-            else setImageResource(com.miniichat.R.mipmap.ic_launcher)
-            contentDescription = "${task?.characterName ?: name}，点击快速聊天，长按快捷操作"
-            clipToOutline = true
-            background = GradientDrawable().apply { cornerRadius = dp(24).toFloat(); setColor(Color.LTGRAY) }
-        }
-        panel.addView(avatarView)
-        panel.addView(label(if (chatting) "正在思考" else task?.statusLabel ?: "空闲", 11).apply { gravity = Gravity.CENTER })
-        attachDrag(avatarView)
-        if (expanded) {
+        val ui = CompanionViews(this, dark)
+        val panel = ui.column().apply { setPadding(dp(if (expanded) 16 else 6), dp(if (expanded) 16 else 6), dp(if (expanded) 16 else 6), dp(if (expanded) 16 else 6)) }
+        val path = CompanionAppearance.resolve(CompanionAppearance.avatar(this), task?.avatarPath, avatar)
+        val title = task?.characterName ?: name
+        val state = if (chatting) "正在回复" else task?.statusLabel ?: "陪着你"
+        if (!expanded) {
+            val bubble = FrameLayout(this)
+            val photo = ui.avatar(path, 52, title).apply { contentDescription = "$title，$state，点按展开，长按菜单" }
+            bubble.addView(photo); attachDrag(photo)
+            val dot = View(this).apply {
+                background = GradientDrawable().apply { setColor(if (task?.state in setOf(TaskState.APPROVAL, TaskState.QUESTION, TaskState.FAILED)) Color.rgb(231, 155, 64) else ui.accent); shape = GradientDrawable.OVAL; setStroke(dp(2), ui.surface) }
+            }
+            bubble.addView(dot, FrameLayout.LayoutParams(dp(12), dp(12), Gravity.BOTTOM or Gravity.END))
+            panel.addView(bubble)
+        } else {
+            panel.background = ui.shape(ui.surface, 24); panel.elevation = dp(8).toFloat()
+            panel.addView(ui.header(title, state, path,
+                { expanded = false; shortcut = false; PetMessages.notice.value = ""; render() },
+                { stopSelf() }, ::attachDrag))
+            val body = ui.column().apply { setPadding(0, dp(16), 0, dp(4)) }
+            fun action(text: String, primary: Boolean = false, click: () -> Unit) { body.addView(ui.action(text, primary, click)) }
             if (shortcut) {
-                button(panel, "打开任务中心") { startActivity(TaskNotices.openIntent(this)) }
-                button(panel, "暂停当前任务") { task?.let { TaskActions.respond(this, it.id, "pause") } }
-                button(panel, "关闭悬浮头像") { stopSelf() }
+                action("任务中心") { startActivity(TaskNotices.openIntent(this)) }
+                if (task?.let { TaskActions.active(it.state) } == true) action("暂停任务") { task?.let { respond(it, "pause") } }
+                action("陪伴设置") { TaskNavigation.companion.value = true; startActivity(TaskNotices.openIntent(this)) }
             } else {
                 task?.let { t ->
-                    panel.addView(label(t.detail.take(380), 13))
+                    body.addView(ui.label(t.goal, 15).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); maxLines = 2 })
+                    if (t.state == TaskState.APPROVAL && t.steps.getOrNull(t.cursor) != null) {
+                        val step = t.steps[t.cursor]
+                        val description = buildString {
+                            append(com.miniichat.tasks.agent.AgentPolicy.specs[step.tool]?.title ?: step.tool)
+                            if (step.source.isNotBlank()) append("\n从：${step.source}")
+                            if (step.destination.isNotBlank()) append("\n到：${step.destination}")
+                            step.arguments.filterKeys { it !in setOf("snapshot", "node") }.forEach { (key, value) -> append("\n$key：$value") }
+                            append("\n${step.reason}")
+                        }
+                        body.addView(ui.label(description, 13, true).apply { setPadding(0, dp(8), 0, dp(4)) })
+                    } else if (t.detail.isNotBlank()) body.addView(ui.label(t.detail, 13, true).apply { setPadding(0, dp(8), 0, dp(4)) })
                     when (t.state) {
                         TaskState.APPROVAL -> {
-                            button(panel, "允许一次") { respond(t, "approve") }
+                            action("允许一次", true) { respond(t, "approve") }
                             if (t.approvedSuggestion && (t.engineVersion < 2 || t.steps.getOrNull(t.cursor)?.let { com.miniichat.tasks.agent.AgentPolicy.canRemember(it) } == true))
-                                button(panel, "该范围内同类操作以后允许") { respond(t, "always") }
-                            button(panel, "取消任务") { respond(t, "cancel") }
+                                action("此范围内以后允许") { respond(t, "always") }
+                            action("取消任务") { respond(t, "cancel") }
                         }
                         TaskState.QUESTION -> {
-                            if (t.neededPermission == "handoff") button(panel, "打开任务页完成系统操作") { startActivity(TaskNotices.openIntent(this)) }
-                            t.steps.getOrNull(t.cursor)?.options?.forEach { option -> button(panel, option) { TaskActions.respond(this, t.id, "answer", option, t.approvalToken) } }
+                            if (t.neededPermission == "handoff") action("打开操作", true) { startActivity(TaskNotices.openIntent(this)) }
+                            t.steps.getOrNull(t.cursor)?.options?.forEach { option -> action(option) { TaskActions.respond(this, t.id, "answer", option, t.approvalToken) } }
                         }
-                        TaskState.PERMISSION -> button(panel, "去开启权限") { startActivity(TaskNotices.openIntent(this)) }
-                        TaskState.FAILED, TaskState.PAUSED -> button(panel, "从原步骤继续") { respond(t, "resume") }
+                        TaskState.PERMISSION -> action("去授权", true) { startActivity(TaskNotices.openIntent(this)) }
+                        TaskState.FAILED, TaskState.PAUSED -> action("继续任务", true) { respond(t, "resume") }
                         else -> Unit
                     }
                 }
-                if (PetMessages.notice.value.isNotBlank()) panel.addView(label(PetMessages.notice.value.take(400), 13))
-                if (quickReply.isNotBlank()) panel.addView(label(quickReply.takeLast(700), 13))
+                if (PetMessages.notice.value.isNotBlank()) body.addView(ui.label(PetMessages.notice.value).apply { setPadding(0, dp(12), 0, dp(12)) })
+                if (quickReply.isNotBlank()) body.addView(ui.label(quickReply).apply { setPadding(0, dp(12), 0, dp(12)) })
+                if (task == null && quickReply.isBlank() && PetMessages.notice.value.isBlank()) body.addView(ui.label("我在。有什么想说的？", 15).apply { setPadding(0, dp(8), 0, dp(16)) })
                 val input = EditText(this).apply {
-                    tag = "draft"; hint = "聊一句，或交给我一件事"; setText(draft)
-                    setTextColor(Color.BLACK); setHintTextColor(Color.DKGRAY); textSize = 14f; maxLines = 3
+                    tag = "draft"; hint = "说点什么…"; setText(draft); textSize = 15f
+                    setTextColor(ui.ink); setHintTextColor(ui.muted); maxLines = 3
+                    background = ui.shape(ui.inset, 14); setPadding(dp(12), dp(12), dp(12), dp(12))
+                    layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) }
                     setOnFocusChangeListener { _, focused -> if (focused) {
                         params.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         view?.let { wm.updateViewLayout(it, params) }
@@ -159,41 +193,34 @@ class PetOverlayService : Service() {
                     setOnTouchListener { v, event ->
                         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                             params.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                            view?.let { wm.updateViewLayout(it, params) }
-                            v.requestFocus()
-                            v.post { (getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
-                                .showSoftInput(v, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT) }
+                            view?.let { wm.updateViewLayout(it, params) }; v.requestFocus()
+                            v.post { (getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).showSoftInput(v, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT) }
                         }
+                        if (event.actionMasked == MotionEvent.ACTION_UP) v.performClick()
                         false
                     }
                 }
-                panel.addView(input)
-                button(panel, "发送聊天") {
+                body.addView(input)
+                val actions = ui.row()
+                actions.addView(ui.action("办件事") { TaskNavigation.chatDraft.value = input.text.toString(); startActivity(TaskNotices.openIntent(this)); expanded = false; render() },
+                    LinearLayout.LayoutParams(0, -2, 1f).apply { topMargin = dp(8); marginEnd = dp(8) })
+                actions.addView(ui.action(if (chatting) "回复中…" else "发送", true) {
                     val text = input.text.toString().trim()
                     if (text.isNotEmpty() && !chatting) { draft = ""; input.setText(""); chat(text) }
-                }
-                button(panel, "交给我做 · 先确认范围") {
-                    TaskNavigation.chatDraft.value = input.text.toString()
-                    startActivity(TaskNotices.openIntent(this)); expanded = false; render()
-                }
+                }.apply { isEnabled = !chatting }, LinearLayout.LayoutParams(0, -2, 1f).apply { topMargin = dp(8) })
+                body.addView(actions)
             }
-            button(panel, "收起") { expanded = false; shortcut = false; PetMessages.notice.value = ""; render() }
+            panel.addView(ui.scroll(body, (resources.displayMetrics.heightPixels * 0.5).toInt()))
         }
         if (old != null) runCatching { wm.removeView(old) }
         view = panel
-        params.width = dp(if (expanded) 288 else 80)
+        params.width = if (expanded) minOf(dp(328), resources.displayMetrics.widthPixels - dp(24)) else dp(64)
+        params.height = WindowManager.LayoutParams.WRAP_CONTENT
         params.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        panel.measure(View.MeasureSpec.makeMeasureSpec(params.width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(resources.displayMetrics.heightPixels, View.MeasureSpec.AT_MOST))
         params.x = params.x.coerceIn(0, (resources.displayMetrics.widthPixels - params.width).coerceAtLeast(0))
-        val scroll = panel // Keep drag handle at the top; cap expanded view to fit screen.
-        params.height = if (expanded) (resources.displayMetrics.heightPixels * 0.75).toInt() else WindowManager.LayoutParams.WRAP_CONTENT
-        // Scroll entire content when confirmation/text makes the panel taller than the display.
-        if (expanded) {
-            val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            while (panel.childCount > 0) { val child = panel.getChildAt(0); panel.removeViewAt(0); content.addView(child) }
-            panel.addView(ScrollView(this).apply { addView(content); isFillViewport = false })
-        }
-        params.y = params.y.coerceIn(0, (resources.displayMetrics.heightPixels - if (expanded) params.height else dp(100)).coerceAtLeast(0))
-        runCatching { wm.addView(scroll, params) }.onFailure { stopSelf() }
+        params.y = params.y.coerceIn(0, (resources.displayMetrics.heightPixels - panel.measuredHeight - dp(32)).coerceAtLeast(0))
+        runCatching { wm.addView(panel, params) }.onFailure { stopSelf() }
     }
     private fun attachDrag(handle: View) {
         var sx = 0f; var sy = 0f; var x = 0; var y = 0; var down = 0L; var dragged = false
@@ -206,7 +233,7 @@ class PetOverlayService : Service() {
                         view?.let { runCatching { wm.updateViewLayout(it, params) } } }
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!dragged) { shortcut = event.eventTime - down > 500; expanded = if (shortcut) true else !expanded }
+                    if (!dragged) { handle.performClick(); shortcut = event.eventTime - down > 500; expanded = if (shortcut) true else !expanded }
                     else params.x = if (params.x < resources.displayMetrics.widthPixels / 2) 0 else resources.displayMetrics.widthPixels - params.width
                     TaskActions.preferences(this).edit().putInt("pet_x", params.x).putInt("pet_y", params.y).apply()
                     render()
@@ -237,13 +264,16 @@ class PetOverlayService : Service() {
         }
     }
     private fun respond(task: PhoneTask, action: String) { TaskActions.respond(this, task.id, action, token = task.approvalToken) }
-    private fun label(text: String, size: Int) = TextView(this).apply { this.text = text; setTextColor(Color.rgb(28, 28, 30)); textSize = size.toFloat(); setPadding(0, dp(5), 0, dp(5)) }
-    private fun button(parent: LinearLayout, title: String, onClick: () -> Unit) {
-        parent.addView(Button(this).apply { text = title; isAllCaps = false; textSize = 12f; setTextColor(Color.BLACK)
-            filterTouchesWhenObscured = true; setOnClickListener { onClick() } })
-    }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        dark = themeMode == "dark" || (themeMode == "system" && newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+        render()
+    }
     override fun onDestroy() {
+        destroyed = true
+        CompanionRuntime.running.value = false
+        TaskActions.preferences(this).unregisterOnSharedPreferenceChangeListener(lookListener)
         serviceScope.cancel(); view?.let { runCatching { wm.removeView(it) } }; view = null
         super.onDestroy()
     }

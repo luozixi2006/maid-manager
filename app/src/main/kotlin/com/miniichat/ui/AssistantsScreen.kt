@@ -27,10 +27,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -76,11 +74,7 @@ fun AssistantsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
-            Text(
-                stringResource(R.string.persona_hint),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Disclosure("名字与人设如何使用") { Text(stringResource(R.string.persona_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Spacer(Modifier.height(12.dp))
             Button(onClick = { creating = true }, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Add, contentDescription = null)
@@ -93,9 +87,8 @@ fun AssistantsScreen(
                         .fillMaxWidth()
                         .padding(vertical = 4.dp)
                         .clickable { onSelect(assistant.id) },
-                    color = if (assistant.id == activeId) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(12.dp)
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(20.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
@@ -205,7 +198,7 @@ private fun PersonaEditorDialog(
                 }
                 if (photos.busy) Text("正在处理照片…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
+                AppTextField(
                     value = name,
                     onValueChange = { name = it },
                     modifier = Modifier.fillMaxWidth(),
@@ -214,7 +207,7 @@ private fun PersonaEditorDialog(
                     singleLine = true
                 )
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
+                AppTextField(
                     value = displayName,
                     onValueChange = { displayName = it.take(60) },
                     modifier = Modifier.fillMaxWidth(),
@@ -224,7 +217,7 @@ private fun PersonaEditorDialog(
                     singleLine = true
                 )
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
+                AppTextField(
                     value = prompt,
                     onValueChange = { prompt = it },
                     modifier = Modifier.fillMaxWidth(),
@@ -241,7 +234,7 @@ private fun PersonaEditorDialog(
                         stringResource(R.string.allow_this_character_proactive),
                         Modifier.weight(1f)
                     )
-                    Switch(
+                    AppSwitch(
                         checked = proactiveEnabled,
                         onCheckedChange = { proactiveEnabled = it }
                     )

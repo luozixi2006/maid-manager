@@ -24,8 +24,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -76,25 +74,25 @@ fun ProvidersScreen(
                 Column(Modifier.weight(1f)) {
                     Text("模型服务", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "可配置多个兼容服务；失败时按备用顺序自动切换",
+                        "当前服务与备用模型",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                OutlinedButton(onClick = onCreate) {
+                FilledTonalButton(onClick = onCreate) {
                     Icon(Icons.Default.Add, contentDescription = null)
                     Text("添加")
                 }
             }
             Spacer(Modifier.height(8.dp))
-            active?.let { ProviderHelp(it.baseUrl) }
+            active?.let { Disclosure("官网与配置帮助") { ProviderHelp(it.baseUrl) } }
 
             if (providers.isEmpty()) {
                 Text("还没有模型服务", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             providers.sortedBy { it.priority }.forEach { provider ->
                 val selected = provider.id == active?.id
-                Row(
+                AppGroup { Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable(enabled = provider.models.isNotEmpty()) {
@@ -131,7 +129,8 @@ fun ProvidersScreen(
                         }
                     }
                 }
-                HorizontalDivider()
+                }
+                Spacer(Modifier.height(8.dp))
             }
 
             if (active != null) {
@@ -139,7 +138,7 @@ fun ProvidersScreen(
                 Text("${active.name} 的模型", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
+                    AppTextField(
                         value = modelInput,
                         onValueChange = { modelInput = it },
                         modifier = Modifier.weight(1f),

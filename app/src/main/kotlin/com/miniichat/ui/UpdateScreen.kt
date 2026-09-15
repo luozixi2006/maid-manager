@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
@@ -34,15 +37,18 @@ fun UpdateScreen(
     ) {
         SettingsTopBar("软件更新", onBack)
         Column(
-            modifier = Modifier.fillMaxSize().padding(20.dp),
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("当前版本", style = MaterialTheme.typography.labelLarge)
-            Text(com.miniichat.BuildConfig.VERSION_NAME, style = MaterialTheme.typography.headlineSmall)
+            AppGroup { Column(Modifier.padding(20.dp)) {
+                Text("当前版本", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+                Text(com.miniichat.BuildConfig.VERSION_NAME, style = MaterialTheme.typography.headlineSmall)
+            } }
             Spacer(Modifier.height(8.dp))
             when (state) {
                 UpdateUiState.Idle -> {
-                    Text("从项目的 GitHub Release 安全检查新版本。")
+                    Text("检查并安装最新版本。", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Button(onClick = onCheck, modifier = Modifier.fillMaxWidth()) { Text("检查更新") }
                 }
                 UpdateUiState.Checking -> ProgressLine("正在检查 GitHub Release…")

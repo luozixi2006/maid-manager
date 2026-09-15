@@ -73,7 +73,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 18.dp, vertical = 10.dp)
+                .navigationBarsPadding().padding(horizontal = 20.dp, vertical = 10.dp)
         ) {
             SettingsSection(stringResource(R.string.section_services_network)) {
                 SettingsEntry(
@@ -91,7 +91,7 @@ fun SettingsScreen(
             }
 
             SettingsSection(stringResource(R.string.section_conversation)) {
-                SettingsEntry(title = "交给我做", subtitle = "后台任务、屏幕边缘陪伴与事件触发", onClick = onOpenTasks)
+                SettingsEntry(title = "任务与陪伴", subtitle = "任务 · 悬浮头像 · 自动提醒", onClick = onOpenTasks)
                 SettingsEntry(
                     title = stringResource(R.string.personas),
                     subtitle = assistant?.name ?: stringResource(R.string.no_persona_selected),
@@ -178,10 +178,7 @@ private fun SettingsSection(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontWeight = FontWeight.SemiBold
     )
-    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.onSurface) {
-        Column(content = { content() })
-    }
+    AppGroup { content() }
     if (!isLast) Spacer(Modifier.height(12.dp))
 }
 
@@ -205,7 +202,7 @@ private fun SettingsEntry(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
@@ -222,7 +219,7 @@ private fun SettingsEntry(
 @Composable
 fun SettingsTopBar(title: String, onBack: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = onBack) {
@@ -232,5 +229,4 @@ fun SettingsTopBar(title: String, onBack: () -> Unit) {
         Text(title, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f))
     }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
 }

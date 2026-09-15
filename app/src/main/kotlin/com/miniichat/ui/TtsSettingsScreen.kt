@@ -15,8 +15,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -50,7 +48,7 @@ fun TtsSettingsScreen(
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)
         ) {
-            OutlinedTextField(
+            AppTextField(
                 value = settings.ttsProvider,
                 onValueChange = {},
                 modifier = Modifier.fillMaxWidth(),
@@ -59,7 +57,7 @@ fun TtsSettingsScreen(
                 singleLine = true
             )
             Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
+            AppTextField(
                 value = baseUrl,
                 onValueChange = { baseUrl = it },
                 modifier = Modifier.fillMaxWidth(),
@@ -68,7 +66,7 @@ fun TtsSettingsScreen(
                 singleLine = true
             )
             Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
+            AppTextField(
                 value = apiKey,
                 onValueChange = { apiKey = it },
                 modifier = Modifier.fillMaxWidth(),
@@ -77,7 +75,7 @@ fun TtsSettingsScreen(
                 singleLine = true
             )
             Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
+            AppTextField(
                 value = model,
                 onValueChange = { model = it },
                 modifier = Modifier.fillMaxWidth(),
@@ -85,7 +83,7 @@ fun TtsSettingsScreen(
                 singleLine = true
             )
             Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
+            AppTextField(
                 value = voice,
                 onValueChange = { voice = it },
                 modifier = Modifier.fillMaxWidth(),
@@ -105,13 +103,14 @@ fun TtsSettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Switch(checked = autoRead, onCheckedChange = { autoRead = it })
+                AppSwitch(checked = autoRead, onCheckedChange = { autoRead = it })
             }
             Spacer(Modifier.height(20.dp))
-            Text("IndexTTS 自建服务：地址填写电脑的服务地址；Model 使用服务配置的名称，Voice ID 使用参考音频文件名。免鉴权服务的密钥留空。",
+            Disclosure("语音配置帮助") { Text("IndexTTS：填写服务地址、模型名称和参考音频文件名。免鉴权服务的密钥留空。",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             OfficialLink("IndexTTS · 官方项目与参考音频说明", "https://github.com/index-tts/index-tts")
             OfficialLink("本项目 · 语音接口与填写示例", "https://github.com/luozixi2006/maid-manager/blob/main/docs/TTS_API.md")
+            }
             Spacer(Modifier.height(12.dp))
             Button(
                 onClick = {

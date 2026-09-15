@@ -20,8 +20,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -62,16 +60,13 @@ fun ProactiveMessagesScreen(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Text(
-                stringResource(R.string.proactive_messages_hint),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Disclosure("主动消息说明") { Text(stringResource(R.string.proactive_messages_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(stringResource(R.string.allow_proactive_messages), Modifier.weight(1f))
-                Switch(checked = enabled, onCheckedChange = { enabled = it })
+                AppSwitch(checked = enabled, onCheckedChange = { enabled = it })
             }
 
             Text(stringResource(R.string.proactive_frequency), style = MaterialTheme.typography.titleMedium)
@@ -91,14 +86,14 @@ fun ProactiveMessagesScreen(
 
             Text(stringResource(R.string.do_not_disturb), style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
+                AppTextField(
                     value = dndStart,
                     onValueChange = { dndStart = it.take(5); validationError = null },
                     label = { Text("开始 HH:mm") },
                     singleLine = true,
                     modifier = Modifier.weight(1f)
                 )
-                OutlinedTextField(
+                AppTextField(
                     value = dndEnd,
                     onValueChange = { dndEnd = it.take(5); validationError = null },
                     label = { Text("结束 HH:mm") },

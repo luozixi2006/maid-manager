@@ -70,7 +70,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(20.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+            AppGroup {
             AboutRow(
                 title = stringResource(R.string.project_repository),
                 subtitle = repositorySlug ?: stringResource(R.string.repository_not_configured),
@@ -89,6 +89,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 title = stringResource(R.string.third_party_licenses),
                 subtitle = stringResource(R.string.third_party_summary)
             )
+            }
         }
     }
 }
@@ -99,7 +100,7 @@ private fun AboutRow(title: String, subtitle: String, onClick: (() -> Unit)? = n
         modifier = Modifier
             .fillMaxWidth()
             .then(if (onClick == null) Modifier else Modifier.clickable(onClick = onClick))
-            .padding(vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f).padding(end = 12.dp)) {

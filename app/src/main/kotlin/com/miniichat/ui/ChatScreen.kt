@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.HourglassEmpty
+import androidx.compose.material.icons.outlined.TaskAlt
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -159,12 +160,10 @@ fun ChatScreen(
             providerLabel = activeProvider?.name,
             onMenu = onMenu,
             onPickModel = onPickModel,
-            onNew = onNew
+            onNew = onNew,
+            onTasks = { onOpenTasks(input) }
         )
 
-        androidx.compose.material3.TextButton(onClick = { onOpenTasks(input) }, modifier = Modifier.align(Alignment.End)) {
-            Text("交给我做 · 后台任务")
-        }
         if (messages.isEmpty()) {
             Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally) {
@@ -175,7 +174,6 @@ fun ChatScreen(
                 Spacer(Modifier.height(8.dp))
                 Text("发条消息，或分享一张照片", style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                androidx.compose.material3.TextButton(onClick = onEditPersona) { Text("名字与头像") }
             }
         } else {
             LazyColumn(
@@ -262,12 +260,13 @@ private fun ChatTopBar(
     providerLabel: String?,
     onMenu: () -> Unit,
     onPickModel: () -> Unit,
-    onNew: () -> Unit
+    onNew: () -> Unit,
+    onTasks: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
+            .background(MaterialTheme.colorScheme.surface)
             .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
     ) {
         Row(
@@ -311,8 +310,8 @@ private fun ChatTopBar(
                 Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.new_chat),
                     tint = MaterialTheme.colorScheme.onSurface)
             }
+            IconButton(onClick = onTasks) { Icon(Icons.Outlined.TaskAlt, contentDescription = "任务与陪伴", tint = MaterialTheme.colorScheme.onSurface) }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
     }
 }
 

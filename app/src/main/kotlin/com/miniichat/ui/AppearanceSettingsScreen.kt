@@ -18,7 +18,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -60,8 +59,8 @@ fun AppearanceSettingsScreen(
             Spacer(Modifier.height(20.dp))
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(14.dp)
+                color = MaterialTheme.colorScheme.surface,
+                shape = RoundedCornerShape(20.dp)
             ) {
                 Row(
                     Modifier.fillMaxWidth().clickable {
@@ -77,7 +76,7 @@ fun AppearanceSettingsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Switch(
+                    AppSwitch(
                         checked = settings.dynamicColor,
                         onCheckedChange = { onChange(settings.copy(dynamicColor = it)) }
                     )
@@ -91,8 +90,8 @@ fun AppearanceSettingsScreen(
 private fun ThemeChoice(label: String, selected: Boolean, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(14.dp)
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(20.dp)
     ) {
         Row(
             Modifier.fillMaxWidth().clickable(onClick = onClick).padding(12.dp),

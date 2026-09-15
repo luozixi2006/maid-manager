@@ -32,20 +32,20 @@ import androidx.core.view.WindowCompat
  * Grouped neutral surfaces, hairline dividers and one restrained blue accent.
  */
 internal val LightColors = lightColorScheme(
-    primary = Color(0xFF0066CC),
+    primary = Color(0xFF315FBB),
     onPrimary = Color.White,
     primaryContainer = Color(0xFFE8F2FF),
     onPrimaryContainer = Color(0xFF00366F),
     secondary = Color(0xFF0066CC),
     onSecondary = Color.White,
-    background = Color(0xFFF2F2F7),
+    background = Color(0xFFF5F5F7),
     onBackground = Color(0xFF111114),
     surface = Color(0xFFFFFFFF),
     onSurface = Color(0xFF111114),
     surfaceVariant = Color(0xFFF3F2F7),
     onSurfaceVariant = Color(0xFF62626B),
     surfaceContainer = Color(0xFFFFFFFF),
-    surfaceContainerLow = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFEBEDF2),
     surfaceContainerHigh = Color(0xFFE9E9EF),
     outline = Color(0xFFE3E1EA),
     outlineVariant = Color(0xFFEEEDF2),
@@ -66,7 +66,7 @@ internal val DarkColors = darkColorScheme(
     onBackground = Color(0xFFF2F1F7),
     surface = Color(0xFF1C1C1E),
     surfaceContainer = Color(0xFF1C1C1E),
-    surfaceContainerLow = Color(0xFF1C1C1E),
+    surfaceContainerLow = Color(0xFF29292D),
     surfaceContainerHigh = Color(0xFF2C2C2E),
     onSurface = Color(0xFFF2F1F7),
     surfaceVariant = Color(0xFF24242C),
@@ -132,7 +132,7 @@ fun MaidManagerTheme(
                     onBackground = Color(0xFFF2F1F7),
                     surface = Color(0xFF1C1C1E),
                     surfaceContainer = Color(0xFF1C1C1E),
-                    surfaceContainerLow = Color(0xFF1C1C1E),
+                    surfaceContainerLow = Color(0xFF29292D),
                     surfaceContainerHigh = Color(0xFF2C2C2E),
                     onSurface = Color(0xFFF2F1F7),
                     surfaceVariant = Color(0xFF24242C),
@@ -140,7 +140,10 @@ fun MaidManagerTheme(
                     outline = Color(0xFF3A3A45),
                     outlineVariant = Color(0xFF26262E)
                 )
-            } else dyn
+            } else dyn.copy(background = LightColors.background, surface = LightColors.surface,
+                surfaceContainer = LightColors.surfaceContainer, surfaceContainerLow = LightColors.surfaceContainerLow,
+                onSurface = LightColors.onSurface, onSurfaceVariant = LightColors.onSurfaceVariant,
+                surfaceVariant = LightColors.surfaceVariant, outlineVariant = LightColors.outlineVariant)
         }
         darkTheme -> DarkColors
         else -> LightColors

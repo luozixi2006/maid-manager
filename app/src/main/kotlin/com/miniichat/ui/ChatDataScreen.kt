@@ -21,8 +21,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -141,7 +140,7 @@ fun ChatDataScreen(
             ) { handoffReader.launch(arrayOf("application/json", "text/json", "text/plain")) }
 
             if (busy) {
-                Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.large) {
+                Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.large) {
                     Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         CircularProgressIndicator(Modifier.height(22.dp))
                         Text(phase ?: stringResource(R.string.processing))
@@ -193,7 +192,7 @@ fun HandoffEditorScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(stringResource(R.string.handoff_edit_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedTextField(
+            AppTextField(
                 value = json,
                 onValueChange = { json = it; error = null },
                 modifier = Modifier.fillMaxWidth(),
@@ -210,7 +209,7 @@ fun HandoffEditorScreen(
                 },
                 modifier = Modifier.fillMaxWidth()
             ) { Text(stringResource(R.string.save_handoff_file)) }
-            OutlinedButton(
+            FilledTonalButton(
                 onClick = {
                     validated()?.let { content ->
                         clipboard.setText(AnnotatedString(ChatDataCodec.handoffPrompt(content)))
@@ -218,7 +217,7 @@ fun HandoffEditorScreen(
                 },
                 modifier = Modifier.fillMaxWidth()
             ) { Text(stringResource(R.string.copy_for_other_ai)) }
-            OutlinedButton(
+            FilledTonalButton(
                 onClick = { validated()?.let(onUseInNewChat) },
                 modifier = Modifier.fillMaxWidth()
             ) { Text(stringResource(R.string.continue_with_handoff)) }
@@ -236,7 +235,7 @@ private fun DataAction(title: String, subtitle: String, enabled: Boolean, onClic
     Surface(
         onClick = onClick,
         enabled = enabled,
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = MaterialTheme.colorScheme.surface,
         shape = MaterialTheme.shapes.large,
         modifier = Modifier.fillMaxWidth()
     ) {

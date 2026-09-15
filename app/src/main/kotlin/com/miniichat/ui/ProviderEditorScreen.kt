@@ -14,8 +14,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -71,15 +69,9 @@ fun ProviderEditorScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
-            Text(
-                "兼容 OpenAI 接口的服务均可使用。密钥只保存在本机。",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(18.dp))
-            ProviderHelp(baseUrl)
+            Disclosure("服务官网与配置帮助") { ProviderHelp(baseUrl) }
             Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
+            AppTextField(
                 value = name,
                 onValueChange = { name = it },
                 modifier = Modifier.fillMaxWidth(),
@@ -87,7 +79,7 @@ fun ProviderEditorScreen(
                 singleLine = true
             )
             Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
+            AppTextField(
                 value = baseUrl,
                 onValueChange = { baseUrl = it; validation = null },
                 modifier = Modifier.fillMaxWidth(),
@@ -99,14 +91,14 @@ fun ProviderEditorScreen(
             )
             Spacer(Modifier.height(8.dp))
             SettingSwitchRow(
-                title = "需要 Bearer 密钥",
-                summary = "本机或局域网免鉴权服务可关闭",
+                title = "密钥验证",
+                summary = "本地免验证服务可关闭",
                 checked = requiresKey,
                 onCheckedChange = { requiresKey = it }
             )
             if (requiresKey) {
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
+                AppTextField(
                     value = apiKey,
                     onValueChange = { apiKey = it },
                     modifier = Modifier.fillMaxWidth(),
@@ -116,7 +108,7 @@ fun ProviderEditorScreen(
                 )
             }
             Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
+            AppTextField(
                 value = modelId,
                 onValueChange = { modelId = it },
                 modifier = Modifier.fillMaxWidth(),
@@ -124,7 +116,7 @@ fun ProviderEditorScreen(
                 singleLine = true
             )
             Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
+            AppTextField(
                 value = fallbackModels,
                 onValueChange = { fallbackModels = it },
                 modifier = Modifier.fillMaxWidth(),
@@ -200,6 +192,6 @@ private fun SettingSwitchRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        AppSwitch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
