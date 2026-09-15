@@ -32,14 +32,15 @@ import java.util.concurrent.TimeUnit
 
 @Serializable
 enum class TriggerKind(val label: String) {
-    FILES("下载目录出现新 PDF"), NOTIFICATION("选定应用发来通知"), COMPLETED("后台任务完成"),
+    FILES("文件夹出现新文件"), NOTIFICATION("选定应用发来通知"), COMPLETED("后台任务完成"),
     WIFI("连接 Wi-Fi"), CHARGING("接上电源"), TIME("每天某个时间"), APP("打开选定应用")
 }
 
 @Serializable
 data class TriggerRule(val id: String = UUID.randomUUID().toString(), val kind: TriggerKind,
     val match: String = "", val goal: String, val scope: String = "", val enabled: Boolean = true,
-    val signature: String = "", val lastFired: Long = 0, val status: String = "等待首次检测")
+    val signature: String = "", val lastFired: Long = 0, val status: String = "等待首次检测",
+    val rootDirectory: String = "Download", val fileWatchVersion: Int = 0)
 
 object TriggerPolicy {
     fun changed(kind: TriggerKind, previous: String, next: String): Boolean {
@@ -67,11 +68,9 @@ object TriggerEngine {
             try {
                 val signature = when (rule.kind) {
                     TriggerKind.FILES -> {
-                        val tools = DownloadsTools(context, rule.scope)
-                        check(tools.permitted()) { "需要文件权限；开启后会恢复检测" }
-                        tools.root().listFiles()?.filter { it.isFile && it.extension.equals("pdf", true) }
-                            ?.map { "${it.name}:${it.length()}:${it.lastModified()}" }?.sorted()?.joinToString("\n")
-                            ?: error("目录暂时不可读")
+                        check(DownloadsTools(context, "").permitted()) { "需要文件权限；开启后会恢复检测" }
+                        val root = FolderSelection.safeDirectory(FolderSelection.storage(), rule.rootDirectory + if (rule.scope.isBlank()) "" else "/${rule.scope}")
+                        fileSignature(root)
                     }
                     TriggerKind.CHARGING -> {
                         val battery = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -106,13 +105,19 @@ object TriggerEngine {
                     }
                     else -> return@forEach
                 }
-                val fire = TriggerPolicy.changed(rule.kind, rule.signature, signature)
-                store.rule(rule.copy(signature = "ready:$signature", status = "检测中"))
+                val fire = (rule.kind != TriggerKind.FILES || rule.fileWatchVersion >= 1) && TriggerPolicy.changed(rule.kind, rule.signature, signature)
+                store.rule(rule.copy(signature = "ready:$signature", status = "检测中", fileWatchVersion = 1))
                 if (fire) event(context, rule.id, rule.kind.label)
             } catch (e: Exception) {
                 store.rule(rule.copy(status = if (e is IllegalStateException) e.message.orEmpty().take(200) else "暂时无法检测，请检查该触发器的系统权限"))
             }
         }
+    }
+    internal fun fileSignature(root: java.io.File): String {
+        val files = root.walkTopDown().maxDepth(4).onEnter { !it.name.startsWith(".maid-") && it.name != "Android" && !java.nio.file.Files.isSymbolicLink(it.toPath()) }
+            .filter { it.isFile && !it.name.startsWith('.') && !java.nio.file.Files.isSymbolicLink(it.toPath()) }.take(2001).toList()
+        check(files.size <= 2000) { "观察目录超过2000个文件，请选择更小目录" }
+        return files.map { "${it.relativeTo(root).invariantSeparatorsPath}:${it.length()}:${it.lastModified()}" }.sorted().joinToString("\n")
     }
     @Synchronized fun event(context: Context, id: String, summary: String) {
         val store = TaskStore.of(context)
@@ -145,23 +150,22 @@ class EventDecisionWorker(context: Context, params: WorkerParameters) : Coroutin
             val settings = SettingsRepository(applicationContext).settings.first()
             val provider = ProviderStore(applicationContext).snapshot().firstOrNull { it.id == settings.activeProviderId && it.enabled }
                 ?: error("请先配置当前 AI 服务")
+            val character = com.miniichat.data.AssistantStore(applicationContext).snapshot().firstOrNull { it.id == settings.activeAssistantId }
             val client = LlmClient()
             val result = try { client.completeDetailed(provider, settings.activeModel, listOf(
-                ChatMessage("system", "根据用户设置的触发规则和事件类型，判断是否值得联系用户。只返回 JSON {\"contact\":true或false,\"reason\":\"直接对用户说的简短中文提醒\",\"offerFileTask\":false}。只有用户规则明确涉及整理PDF时才允许 offerFileTask=true；普通提醒、聊天、喝水、休息等必须为false。没有授权执行任何工具或读取文件。事件不包含通知正文。不得声称完成了没有实际执行的工作。"),
+                ChatMessage("system", "根据用户规则和事件类型判断是否值得联系用户，用当前人设语气说话，不用工作汇报口吻。只返回 JSON {\"contact\":true或false,\"reason\":\"直接对用户说的话\",\"offerFileTask\":false}。只有规则明确要求文件操作才允许offerFileTask=true，不限格式；闲聊问候必须false。没有授权执行任何工具或读取文件。事件不含通知正文，不得虚构已完成工作。人设：${character?.systemPrompt.orEmpty()}"),
                 ChatMessage("user", taskJson.encodeToString(mapOf("用户规则" to rule.goal, "事件" to inputData.getString("event").orEmpty())))
             ), temperature = 0.2f, structuredJson = true, requestTimeoutMillis = 60000, maxOutputTokens = 500) } finally { client.close() }
             val decision = taskJson.decodeFromString<EventDecision>(result.content.trim().removePrefix("```json").removeSuffix("```").trim())
             val stillEnabled = store.rules().firstOrNull { it.id == rule.id && it.enabled } ?: return@withContext Result.success()
             if (decision.contact && decision.offerFileTask) {
-                TaskActions.create(applicationContext, rule.goal, rule.scope, suggestion = true, ruleId = rule.id)
+                TaskActions.create(applicationContext, rule.goal, rule.scope, suggestion = true, ruleId = rule.id, rootDirectory = rule.rootDirectory)
             } else if (decision.contact) {
                 check(decision.reason.isNotBlank()) { "提醒为空" }
-                val character = com.miniichat.data.AssistantStore(applicationContext).snapshot().firstOrNull { it.id == settings.activeAssistantId }
-                val notice = PhoneTask(goal = "${rule.kind.label} · 主动提醒", providerId = provider.id, providerEndpoint = provider.baseUrl,
-                    model = settings.activeModel, characterName = character?.displayName ?: "女仆", avatarPath = character?.avatarPath.orEmpty(),
-                    state = TaskState.DONE, detail = decision.reason.take(800), sourceRule = rule.id, noticeOnly = true)
-                store.put(notice)
-                TaskNotices.publish(applicationContext, notice)
+                check(character != null) { "请先选择人设" }
+                val saved = CompanionConversation.receive(applicationContext, character, decision.reason.take(800), provider.id, settings.activeModel)
+                com.miniichat.proactive.ProactiveNotifications.publish(applicationContext, character.displayName, decision.reason.take(800), character.avatarPath,
+                    com.miniichat.proactive.ProactiveDestination("normal", saved.id))
             }
             store.rule(stillEnabled.copy(status = when {
                 decision.contact && decision.offerFileTask -> "已发送整理建议，等待你确认"

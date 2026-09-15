@@ -15,7 +15,8 @@ data class Assistant(
     val preferredModel: String? = null,
     val temperature: Float? = null,
     val createdAt: Long = System.currentTimeMillis(),
-    val proactiveEnabled: Boolean = true,
+    val proactiveEnabled: Boolean = false,
+    val proactiveConsentVersion: Int = 0,
     val lastProactiveMessageAt: Long = 0L,
     val nextProactiveCheckAt: Long = 0L,
     val proactiveMessageSummaries: List<String> = emptyList(),
@@ -23,6 +24,8 @@ data class Assistant(
     val conversationName: String = ""
 ) {
     val displayName: String get() = conversationName.trim().ifBlank { name }
+    // Old installations keep their effective choice; new per-persona consent has no hidden master switch.
+    fun canContact(legacyMasterEnabled: Boolean): Boolean = proactiveEnabled && (proactiveConsentVersion >= 1 || legacyMasterEnabled)
 }
 
 object AssistantPresets {

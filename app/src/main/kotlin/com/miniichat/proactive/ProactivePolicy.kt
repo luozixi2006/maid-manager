@@ -5,8 +5,9 @@ import java.util.TimeZone
 import kotlin.math.roundToLong
 
 object ProactivePolicy {
-    const val GLOBAL_THROTTLE_MILLIS = 6L * 60L * 60L * 1000L
-    const val RECENT_USER_ACTIVITY_MILLIS = 2L * 60L * 60L * 1000L
+    const val GLOBAL_THROTTLE_MILLIS = 60L * 60L * 1000L
+    const val RECENT_USER_ACTIVITY_MILLIS = 30L * 60L * 1000L
+    fun initialDelayMillis(randomUnit: Double) = ((5 + 10 * randomUnit.coerceIn(0.0, 1.0)) * 60_000).roundToLong()
 
     fun nextDelayMillis(
         frequency: String,
@@ -15,6 +16,7 @@ object ProactivePolicy {
         failureCount: Int = 0
     ): Long {
         val (minimumHours, maximumHours) = when (frequency) {
+            "persona" -> 1.0 to 4.0
             "rare" -> 48.0 to 120.0
             "frequent" -> 6.0 to 18.0
             else -> 18.0 to 48.0

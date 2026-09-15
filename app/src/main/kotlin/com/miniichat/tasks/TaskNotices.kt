@@ -14,6 +14,7 @@ import com.miniichat.MainActivity
 import kotlinx.coroutines.flow.MutableStateFlow
 
 object TaskNavigation {
+    val permission = MutableStateFlow("")
     val companion = MutableStateFlow(false)
     val open = MutableStateFlow(false)
     val chatDraft = MutableStateFlow("")

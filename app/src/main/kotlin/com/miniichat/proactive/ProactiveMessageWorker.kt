@@ -49,7 +49,6 @@ class ProactiveMessageWorker(
     override suspend fun doWork(): Result {
         val settingsRepository = SettingsRepository(applicationContext)
         val settings = settingsRepository.settings.first()
-        if (!settings.proactiveMessagesEnabled) return Result.success()
         val now = System.currentTimeMillis()
 
         if (ProactivePolicy.isInDoNotDisturb(
@@ -83,7 +82,7 @@ class ProactiveMessageWorker(
         val assistantStore = AssistantStore(applicationContext)
         val candidates = buildList {
             assistantStore.snapshot()
-                .filter { it.proactiveEnabled && it.nextProactiveCheckAt > 0L && it.nextProactiveCheckAt <= now }
+                .filter { it.canContact(settings.proactiveMessagesEnabled) && it.nextProactiveCheckAt > 0L && it.nextProactiveCheckAt <= now }
                 .forEach { add(DueCandidate.Normal(it)) }
         }
 
@@ -115,7 +114,7 @@ class ProactiveMessageWorker(
             .filter { it.assistantId == assistant.id && it.messages.isNotEmpty() }
             .maxByOrNull { it.updatedAt }
 
-        if (conversation == null || shouldWaitForUser(conversation.messages.map {
+        if (shouldWaitForUser(conversation?.messages.orEmpty().map {
                 HistoryMessage(it.role, it.content, it.createdAt, it.isProactive)
             }, now)
         ) {
@@ -137,8 +136,8 @@ class ProactiveMessageWorker(
 
         val memoryRepository = MemoryRepository(applicationContext)
         try {
-            val memories = memoryRepository.enabled(30).joinToString("\n") { "- ${it.content}" }
-            val recent = conversation.messages.takeLast(28).joinToString("\n") {
+            val memories = if (settings.memoryEnabled) memoryRepository.enabled(30).joinToString("\n") { "- ${it.content}" } else ""
+            val recent = conversation?.messages.orEmpty().takeLast(28).joinToString("\n") {
                 "${if (it.role == "user") "User" else assistant.displayName}: ${it.content.take(900)}"
             }.takeLast(14_000)
             val prompt = """
@@ -148,8 +147,10 @@ class ProactiveMessageWorker(
 
                 Rules:
                 - Stay fully in character. Original personality and current personality both matter.
-                - SEND only when there is a natural reason: an unfinished topic, a promise, an important recent event,
-                  a fitting personal update, or relationship context. SKIP is a valid and preferred answer when not useful.
+                - This is companionship, not a task assistant or productivity reminder. A warm greeting, sharing a thought,
+                  continuing a topic or a first introduction can be a natural reason. No file task or event rule is required.
+                - Follow the character's language, intimacy, reserve and tone. Do not repeatedly advertise tools or offer work.
+                - SKIP if the character would rather stay quiet. Never fabricate a real-world activity by User or the character.
                 - Do not repeatedly send generic phrases such as "are you there", "what are you doing", or "have you eaten".
                 - Never invent User's real-world activity, mood, location, or facts not supported below.
                 - Do not repeat any recent proactive topic.
@@ -177,6 +178,12 @@ class ProactiveMessageWorker(
             """.trimIndent()
 
             val decision = requestDecision(provider, modelId, assistant.temperature ?: settings.temperature, prompt)
+            val latestAssistant = assistantStore.snapshot().firstOrNull { it.id == assistant.id } ?: return
+            if (!latestAssistant.canContact(settingsRepository.settings.first().proactiveMessagesEnabled)) return
+            // Don't insert an unsolicited message over a conversation the user has just resumed.
+            if (conversation != null && conversationStore.snapshot().firstOrNull { it.id == conversation.id }?.updatedAt != conversation.updatedAt) {
+                assistantStore.upsert(latestAssistant.withNext(settings, 0.2)); return
+            }
             if (decision.action.equals("SEND", true) && decision.message.isNotBlank()) {
                 val message = Message(
                     id = newId(),
@@ -187,9 +194,10 @@ class ProactiveMessageWorker(
                     isProactive = true,
                     createdAt = now
                 )
-                val saved = conversationStore.appendMessage(conversation.id, message) ?: return
+                val saved = if (conversation != null) conversationStore.appendMessage(conversation.id, message) ?: return
+                    else com.miniichat.data.Conversation(id = newId(), title = "与${assistant.displayName}聊天", assistantId = assistant.id, messages = listOf(message)).also { conversationStore.upsert(it) }
                 assistantStore.upsert(
-                    assistant.afterSuccess(settings, decision, now)
+                    latestAssistant.afterSuccess(settings, decision, now)
                 )
                 settingsRepository.update { it.copy(lastProactiveMessageAt = now) }
                 ProactiveNotifications.publish(
@@ -205,15 +213,16 @@ class ProactiveMessageWorker(
                         "model=$diagnosticModel"
                 )
             } else {
-                assistantStore.upsert(assistant.withNext(settings, decision.next_contact_tendency))
+                assistantStore.upsert(latestAssistant.withNext(settings, decision.next_contact_tendency))
                 Log.i(
                     TAG,
                     "Proactive normal decision=SKIP provider=$diagnosticProvider " +
                         "model=$diagnosticModel"
                 )
             }
+        } catch (error: kotlinx.coroutines.CancellationException) { throw error
         } catch (error: Throwable) {
-            assistantStore.upsert(assistant.afterFailure(settings))
+            assistantStore.snapshot().firstOrNull { it.id == assistant.id }?.let { assistantStore.upsert(it.afterFailure(settings)) }
             Log.e(
                 TAG,
                 "Proactive normal request failed provider=$diagnosticProvider " +
@@ -263,7 +272,7 @@ class ProactiveMessageWorker(
 
     private fun Assistant.withNext(settings: AppSettings, contactTendency: Double?) = copy(
         nextProactiveCheckAt = System.currentTimeMillis() + ProactivePolicy.nextDelayMillis(
-            settings.proactiveFrequency,
+            if (proactiveConsentVersion >= 1) "persona" else settings.proactiveFrequency,
             Random.nextDouble(),
             contactTendency
         ),
@@ -283,7 +292,7 @@ class ProactiveMessageWorker(
 
     private fun Assistant.afterFailure(settings: AppSettings) = copy(
         nextProactiveCheckAt = System.currentTimeMillis() + ProactivePolicy.nextDelayMillis(
-            settings.proactiveFrequency,
+            if (proactiveConsentVersion >= 1) "persona" else settings.proactiveFrequency,
             Random.nextDouble(),
             failureCount = proactiveFailureCount + 1
         ),

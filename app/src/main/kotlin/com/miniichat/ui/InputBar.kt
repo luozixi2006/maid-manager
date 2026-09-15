@@ -1,5 +1,7 @@
 package com.miniichat.ui
 
+import androidx.compose.foundation.border
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -124,6 +126,8 @@ fun InputBar(
         ) {
             TextButton(
                 onClick = { onWebEnabledChange(!webEnabled) },
+                modifier = Modifier.border(1.dp, if (webEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
+                    .background(if (webEnabled) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(12.dp)),
                 colors = ButtonDefaults.textButtonColors(
                     contentColor = if (webEnabled) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant
@@ -131,9 +135,11 @@ fun InputBar(
             ) {
                 Text(webLabel, fontSize = 12.sp)
             }
-            Spacer(Modifier.width(2.dp))
+            Spacer(Modifier.width(8.dp))
             TextButton(
                 onClick = { onReasoningEnabledChange(!reasoningEnabled) },
+                modifier = Modifier.border(1.dp, if (reasoningEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
+                    .background(if (reasoningEnabled) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(12.dp)),
                 colors = ButtonDefaults.textButtonColors(
                     contentColor = if (reasoningEnabled) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant

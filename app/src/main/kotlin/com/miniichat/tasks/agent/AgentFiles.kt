@@ -24,11 +24,14 @@ class AgentFiles(private val context: Context, private val task: PhoneTask) {
         val root = root()
         val source = if (step.source.isBlank()) root else ToolPolicy.resolve(root, step.source)
         val offset = step.arguments["offset"]?.toIntOrNull()?.coerceIn(0, 1000000) ?: 0
-        if (step.tool == "list_files") {
+        if (step.tool in setOf("list_files", "find_files")) {
             check(source.isDirectory) { "不是文件夹" }
-            val list = source.listFiles()?.filter { !it.name.startsWith(".maid-") && !Files.isSymbolicLink(it.toPath()) &&
-                it.name.contains(step.arguments["query"].orEmpty(), ignoreCase = true) }?.sortedBy { it.name } ?: error("目录不可读")
-            return "共${list.size}项，本页起点$offset，下一页offset=${offset + 100}\n" + list.drop(offset).take(100).joinToString("\n") {
+            val candidates = if (step.tool == "find_files") source.walkTopDown().maxDepth(8).onEnter {
+                !it.name.startsWith(".maid-") && it.name != "Android" && !Files.isSymbolicLink(it.toPath())
+            }.filter { it != source }.take(10000).toList() else source.listFiles()?.toList() ?: error("目录不可读")
+            val list = candidates.filter { !it.name.startsWith(".maid-") && it.name != "Android" && !Files.isSymbolicLink(it.toPath()) &&
+                it.name.contains(step.arguments["query"].orEmpty(), ignoreCase = true) }.sortedBy { it.name }
+            return "本次范围内匹配${list.size}项，本页起点$offset，下一页offset=${offset + 100}；递归最多10000项，较大目录请分目录查找\n" + list.drop(offset).take(100).joinToString("\n") {
                 taskJson.encodeToString(mapOf("path" to it.relativeTo(root).invariantSeparatorsPath, "kind" to if (it.isDirectory) "directory" else "file", "bytes" to it.length().toString()))
             }
         }
@@ -38,9 +41,10 @@ class AgentFiles(private val context: Context, private val task: PhoneTask) {
                 PDDocument.load(source).use { PDFTextStripper().apply { startPage = 1; endPage = 10 }.getText(it) }
             }
             in AgentPolicy.textExtensions -> source.inputStream().bufferedReader().use { it.readText() }
-            else -> error("此格式不能直接提取文字；支持文本和PDF，不把二进制当正文")
+            in OfficeText.extensions -> OfficeText.read(source)
+            else -> error("此格式不能提取正文，但可按名称和类型移动、复制、改名；无法确定内容时询问用户")
         }
-        return "文件 ${step.source}，总字符${text.length}，offset=$offset（PDF仅前10页，无OCR）\n" + text.drop(offset).take(12000)
+        return "文件 ${step.source}，提取字符${text.length}，offset=$offset${if (source.extension.equals("pdf", true)) "（仅前10页，无OCR）" else ""}\n" + text.drop(offset).take(12000)
     }
     fun prepare(step: PhoneStep): PhoneStep = ManagedFiles(root()).prepare(step, "${task.id}-${task.cursor}")
     fun execute(step: PhoneStep): String = ManagedFiles(root()).execute(step)

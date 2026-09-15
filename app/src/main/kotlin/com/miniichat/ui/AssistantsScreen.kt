@@ -54,8 +54,12 @@ fun AssistantsScreen(
     onSelect: (String) -> Unit,
     onUpsert: (Assistant) -> Unit,
     onPhotoError: (String) -> Unit,
-    onDelete: (String) -> Unit
+    onDelete: (String) -> Unit,
+    legacyProactiveEnabled: Boolean = false,
+    onQuietHours: () -> Unit = {}
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val notifications = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
     var editingId by rememberSaveable(editOnOpenId) { mutableStateOf(editOnOpenId) }
     val editing = assistants.firstOrNull { it.id == editingId }
     var creating by rememberSaveable { mutableStateOf(false) }
@@ -76,6 +80,7 @@ fun AssistantsScreen(
         ) {
             Disclosure("名字与人设如何使用") { Text(stringResource(R.string.persona_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             Spacer(Modifier.height(12.dp))
+            TextButton(onQuietHours) { Text("消息通知与安静时段") }
             Button(onClick = { creating = true }, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Add, contentDescription = null)
                 Text(stringResource(R.string.add_persona), modifier = Modifier.padding(start = 8.dp))
@@ -132,6 +137,7 @@ fun AssistantsScreen(
     if (creating || editing != null) {
         PersonaEditorDialog(
             initial = editing,
+            legacyProactiveEnabled = legacyProactiveEnabled,
             onPhotoError = onPhotoError,
             onDismiss = {
                 creating = false
@@ -140,6 +146,10 @@ fun AssistantsScreen(
             onSave = {
                 onUpsert(it)
                 onSelect(it.id)
+                if (it.proactiveEnabled && android.os.Build.VERSION.SDK_INT >= 33 &&
+                    androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                }
                 creating = false
                 editingId = null
             }
@@ -167,6 +177,7 @@ fun AssistantsScreen(
 @Composable
 private fun PersonaEditorDialog(
     initial: Assistant?,
+    legacyProactiveEnabled: Boolean,
     onPhotoError: (String) -> Unit,
     onDismiss: () -> Unit,
     onSave: (Assistant) -> Unit
@@ -178,7 +189,7 @@ private fun PersonaEditorDialog(
         onImported = { it.firstOrNull()?.let { path -> avatarPath = path } },
         onError = onPhotoError)
     var prompt by rememberSaveable(initial?.id) { mutableStateOf(initial?.systemPrompt ?: "") }
-    var proactiveEnabled by rememberSaveable(initial?.id) { mutableStateOf(initial?.proactiveEnabled ?: true) }
+    var proactiveEnabled by rememberSaveable(initial?.id) { mutableStateOf(initial?.canContact(legacyProactiveEnabled) ?: false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -231,7 +242,7 @@ private fun PersonaEditorDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        stringResource(R.string.allow_this_character_proactive),
+                        "让这个人设主动来找我",
                         Modifier.weight(1f)
                     )
                     AppSwitch(
@@ -239,6 +250,7 @@ private fun PersonaEditorDialog(
                         onCheckedChange = { proactiveEnabled = it }
                     )
                 }
+                Text("依照人设和最近聊天来问候、分享话题，不用配置任务规则。开启后会按需调用当前模型；未回复时不连发。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = {
@@ -249,7 +261,9 @@ private fun PersonaEditorDialog(
                         conversationName = displayName.trim(),
                         avatarPath = avatarPath,
                         systemPrompt = prompt.trim(),
-                        proactiveEnabled = proactiveEnabled
+                        proactiveEnabled = proactiveEnabled,
+                        proactiveConsentVersion = 1,
+                        nextProactiveCheckAt = if (proactiveEnabled != initial?.canContact(legacyProactiveEnabled) || (initial?.proactiveConsentVersion ?: 0) < 1) 0L else initial?.nextProactiveCheckAt ?: 0L
                     )
                     onSave(value)
                 },

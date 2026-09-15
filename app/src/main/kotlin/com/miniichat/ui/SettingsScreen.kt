@@ -91,7 +91,7 @@ fun SettingsScreen(
             }
 
             SettingsSection(stringResource(R.string.section_conversation)) {
-                SettingsEntry(title = "任务与陪伴", subtitle = "任务 · 悬浮头像 · 自动提醒", onClick = onOpenTasks)
+                SettingsEntry(title = "任务与陪伴", subtitle = "悬浮聊天 · 帮我办事 · 事件提醒", onClick = onOpenTasks)
                 SettingsEntry(
                     title = stringResource(R.string.personas),
                     subtitle = assistant?.name ?: stringResource(R.string.no_persona_selected),
@@ -102,15 +102,6 @@ fun SettingsScreen(
                     subtitle = if (settings.memoryEnabled) stringResource(R.string.memory_count, memoryCount)
                     else stringResource(R.string.disabled),
                     onClick = onOpenMemories
-                )
-                SettingsEntry(
-                    title = stringResource(R.string.proactive_messages),
-                    subtitle = if (settings.proactiveMessagesEnabled) {
-                        stringResource(R.string.proactive_messages_enabled)
-                    } else {
-                        stringResource(R.string.disabled)
-                    },
-                    onClick = onOpenProactiveMessages
                 )
             }
 

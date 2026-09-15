@@ -11,7 +11,8 @@ data class ToolSpec(val name: String, val title: String, val risk: Risk, val per
 object AgentPolicy {
     val specs = listOf(
         ToolSpec("list_files", "查看文件", Risk.READ, "files", "source=子目录(空为根); query=可选名称关键词; offset=分页起点。返回每页100条。"),
-        ToolSpec("read_file", "读取文件", Risk.READ, "files", "source=文件相对路径; offset=文本字符起点。支持PDF/TXT/MD/CSV/JSON/XML/源码等文本。"),
+        ToolSpec("find_files", "查找文件与目录", Risk.READ, "files", "source=子目录(空为根); query=可选名称或扩展名关键词; offset=分页。递归最多8层/10000项，不限文件格式，先查真实名称再操作。"),
+        ToolSpec("read_file", "读取文件", Risk.READ, "files", "source=文件相对路径; offset=文本字符起点。支持DOCX/XLSX/PPTX/PDF/TXT/MD/CSV/JSON/XML/源码等文字；不识别照片/音视频正文，不执行宏或公式。其他格式可以按元数据整理。"),
         ToolSpec("mkdir", "创建文件夹", Risk.CHANGE, "files", "destination=相对路径"),
         ToolSpec("copy", "复制文件", Risk.CHANGE, "files", "source,destination=相对文件路径; 不覆盖"),
         ToolSpec("move", "移动文件", Risk.CHANGE, "files", "source,destination=相对文件路径; 不覆盖。先mkdir目标目录"),
@@ -37,7 +38,7 @@ object AgentPolicy {
     ).associateBy { it.name }
     val fileKinds = specs.filterValues { it.permission == "files" }.keys
     val replaySafe = setOf("mkdir", "copy", "move", "rename", "write_text", "trash", "restore")
-    val repeatableReads = setOf("list_files", "read_file", "list_apps", "web_search", "read_screen", "read_notifications")
+    val repeatableReads = setOf("list_files", "find_files", "read_file", "list_apps", "web_search", "read_screen", "read_notifications")
     val textExtensions = setOf("txt", "md", "csv", "json", "xml", "html", "css", "js", "ts", "kt", "java", "py", "yaml", "yml", "log", "ini")
     fun spec(name: String) = specs[name] ?: error("工具未开放：$name")
     fun validate(step: PhoneStep): PhoneStep {

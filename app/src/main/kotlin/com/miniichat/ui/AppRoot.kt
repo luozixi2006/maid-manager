@@ -249,7 +249,9 @@ fun AppRoot(vm: ChatViewModel) {
                     onSelect = { vm.selectAssistant(it) },
                     onUpsert = { vm.upsertAssistant(it) },
                     onPhotoError = vm::reportPhotoFailure,
-                    onDelete = { vm.deleteAssistant(it) }
+                    onDelete = { vm.deleteAssistant(it) },
+                    legacyProactiveEnabled = settings.proactiveMessagesEnabled,
+                    onQuietHours = { screen = Screen.ProactiveMessages }
                 )
             }
             Screen.Providers -> {
@@ -354,7 +356,7 @@ fun AppRoot(vm: ChatViewModel) {
             Screen.ProactiveMessages -> {
                 ProactiveMessagesScreen(
                     settings = settings,
-                    onBack = { screen = Screen.Settings },
+                    onBack = { screen = Screen.Assistants },
                     onSave = { next -> vm.updateSettings { next } }
                 )
             }
@@ -387,7 +389,9 @@ fun AppRoot(vm: ChatViewModel) {
                     onInstall = updateVm::install
                 )
             }
-            Screen.Tasks -> com.miniichat.tasks.TasksScreen(onBack = { screen = Screen.Chat })
+            Screen.Tasks -> com.miniichat.tasks.TasksScreen(onBack = { screen = Screen.Chat }, onPersona = {
+                personaReturnScreen = Screen.Tasks; personaToEdit = settings.activeAssistantId; screen = Screen.Assistants
+            })
         }
 
         }

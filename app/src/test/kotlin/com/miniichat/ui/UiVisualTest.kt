@@ -51,17 +51,41 @@ class UiVisualTest {
     }
     @Test fun companionDark() {
         TaskNavigation.companion.value = true
-        compose.setContent { MaidManagerTheme("dark", false) { TasksScreen {} } }
+        compose.setContent { MaidManagerTheme("dark", false) { TasksScreen(onBack = {}) } }
         compose.onNodeWithText("更换头像").assertExists()
         capture("companion-dark")
     }
     @Test fun tasksAndCompanion() {
-        compose.setContent { MaidManagerTheme("light", false) { TasksScreen {} } }
+        compose.setContent { MaidManagerTheme("light", false) { TasksScreen(onBack = {}) } }
         capture("tasks-light")
-        compose.onNodeWithText("陪伴", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("屏幕陪伴", useUnmergedTree = true).performClick()
         compose.onNodeWithText("更换头像").assertExists()
         compose.onNodeWithText("显示悬浮头像").assertExists()
         capture("companion-settings")
+    }
+    @Test fun reasoningAndSourcesHaveSeparateContainers() {
+        compose.setContent { MaidManagerTheme("dark", false) {
+            androidx.compose.foundation.layout.Column {
+                ReasoningBlock("正在核对资料与条件", "", true, false)
+                SourcesBlock(listOf(SourceReference("官方说明", url = "https://developer.android.com")))
+            }
+        } }
+        compose.onNodeWithText("正在核对资料与条件").assertExists()
+        capture("reasoning-sources-dark")
+    }
+    @Test fun folderPickerShowsActualNamesWithoutTypingPaths() {
+        val root = android.os.Environment.getExternalStorageDirectory()
+        File(root, "Documents/Project_2026/Materials").mkdirs()
+        compose.setContent { MaidManagerTheme("light", false) { FolderPicker("Documents", {}, {}) } }
+        compose.waitUntil(5000) { compose.onAllNodesWithText("▸ 文档 / Project_2026").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("使用此文件夹").assertIsEnabled()
+        capture("folder-picker")
+    }
+    @Test fun searchAndReasoningButtonsAreVisibleInBothStates() {
+        compose.setContent { MaidManagerTheme("light", false) {
+            InputBar("", {}, {}, {}, false, false, true, true, "high", {}, {}, {})
+        } }
+        capture("chat-tools")
     }
     @After fun closeDatabase() {
         WorkManagerTestInitHelper.closeWorkDatabase()

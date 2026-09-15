@@ -1,5 +1,7 @@
 package com.miniichat.ui
 
+import androidx.compose.foundation.border
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -727,7 +729,7 @@ private fun PlaybackButton(
 }
 
 @Composable
-private fun ReasoningBlock(
+internal fun ReasoningBlock(
     reasoningText: String,
     summary: String,
     isStreaming: Boolean,
@@ -744,9 +746,10 @@ private fun ReasoningBlock(
         reasoningText.isNotBlank() -> stringResource(R.string.reasoning_process)
         else -> stringResource(R.string.reasoning_summary)
     }
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+        .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(12.dp)).padding(12.dp)) {
         Row(
-            modifier = Modifier.clickable(enabled = displayText.isNotBlank()) { expanded = !expanded }
+            modifier = Modifier.fillMaxWidth().clickable(enabled = displayText.isNotBlank()) { expanded = !expanded }
                 .padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -776,9 +779,10 @@ private fun ReasoningBlock(
 }
 
 @Composable
-private fun SourcesBlock(sources: List<com.miniichat.data.SourceReference>) {
+internal fun SourcesBlock(sources: List<com.miniichat.data.SourceReference>) {
     val uriHandler = LocalUriHandler.current
-    Column(Modifier.fillMaxWidth()) {
+    Column(Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+        .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(12.dp)).padding(12.dp)) {
         Text(
             stringResource(R.string.sources),
             style = MaterialTheme.typography.labelMedium,

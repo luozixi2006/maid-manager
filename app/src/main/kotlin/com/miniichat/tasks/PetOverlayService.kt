@@ -25,6 +25,8 @@ import java.io.File
 
 object PetMessages {
     val notice = MutableStateFlow("")
+    var conversationId: String = ""
+    fun show(text: String, conversation: String) { conversationId = conversation; show(text) }
     fun show(text: String) { notice.value = text.take(1200) }
 }
 
@@ -40,9 +42,17 @@ class PetOverlayService : Service() {
     private var name = "女仆"
     private var avatar = ""
     private var lastAlert = ""
+    private val openedAt = System.currentTimeMillis()
     private var quickReply = ""
     private var chatting = false
-    private val quickHistory = mutableListOf<ChatMessage>()
+    private var conversation: Conversation? = null
+    private var conversationId = ""
+    private var activePersona = ""
+    private var workMode = false
+    private var submitting = false
+    private var pendingGoal = ""
+    private var pendingFolder = ""
+    private var availableBottom = 0
     private var draft = ""
     private var dark = false
     private var destroyed = false
@@ -82,11 +92,15 @@ class PetOverlayService : Service() {
             }
             render()
             launch {
-                combine(SettingsRepository(this@PetOverlayService).settings, AssistantStore(this@PetOverlayService).assistantsFlow) { settings, assistants -> settings to assistants }
-                    .collect { (latest, assistants) ->
+                combine(SettingsRepository(this@PetOverlayService).settings, AssistantStore(this@PetOverlayService).assistantsFlow,
+                    ConversationStore(this@PetOverlayService).conversationsFlow) { settings, assistants, chats -> Triple(settings, assistants, chats) }
+                    .collect { (latest, assistants, chats) ->
                         themeMode = latest.themeMode
                         dark = themeMode == "dark" || (themeMode == "system" && resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES)
-                        assistants.firstOrNull { it.id == latest.activeAssistantId }?.let { name = it.displayName; avatar = it.avatarPath.orEmpty() }
+                        if (activePersona != latest.activeAssistantId) { activePersona = latest.activeAssistantId; conversationId = ""; quickReply = "" }
+                        conversation = chats.firstOrNull { it.id == conversationId } ?: chats.filter { it.assistantId == activePersona }.maxByOrNull { it.updatedAt }
+                        conversationId = conversation?.id.orEmpty()
+                        assistants.firstOrNull { it.id == (conversation?.assistantId ?: activePersona) }?.let { name = it.displayName; avatar = it.avatarPath.orEmpty() }
                         render()
                     }
             }
@@ -99,15 +113,22 @@ class PetOverlayService : Service() {
                 val t = task
                 if (t != null && t.state in setOf(TaskState.QUESTION, TaskState.APPROVAL, TaskState.PERMISSION, TaskState.DONE, TaskState.FAILED)) {
                     val alert = "${t.id}:${t.state}:${t.cursor}"
-                    if (lastAlert != alert && CompanionAppearance.popups(this@PetOverlayService) && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
-                        lastAlert = alert; expanded = true
+                    if (t.updatedAt >= openedAt && lastAlert != alert && CompanionAppearance.popups(this@PetOverlayService) && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
+                        lastAlert = alert; expanded = true; workMode = true
                     }
                 }
                 render()
             } }
-            launch { PetMessages.notice.collect { if (it.isNotBlank() && CompanionAppearance.popups(this@PetOverlayService) && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) {
-                expanded = true; render()
-            } } }
+            launch { PetMessages.notice.collect { notice ->
+                if (notice.isNotBlank()) {
+                    conversationId = PetMessages.conversationId
+                    conversation = withContext(Dispatchers.IO) { ConversationStore(this@PetOverlayService).snapshot().firstOrNull { it.id == conversationId } }
+                    AssistantStore(this@PetOverlayService).snapshot().firstOrNull { it.id == conversation?.assistantId }?.let { name = it.displayName; avatar = it.avatarPath.orEmpty() }
+                    workMode = false
+                    if (CompanionAppearance.popups(this@PetOverlayService) && !getSystemService(KeyguardManager::class.java).isKeyguardLocked) expanded = true
+                    render()
+                }
+            } }
             launch { while (isActive) {
                 withContext(Dispatchers.IO) { TriggerEngine.poll(this@PetOverlayService) }
                 delay(15_000)
@@ -122,121 +143,171 @@ class PetOverlayService : Service() {
         if (destroyed) return
         if (!::wm.isInitialized || !Settings.canDrawOverlays(this)) { stopSelf(); return }
         val old = view
+        val focused = old?.findViewWithTag<EditText>("draft")?.hasFocus() == true
+        val previousHeight = params.height
         old?.findViewWithTag<EditText>("draft")?.let { draft = it.text.toString() }
         val ui = CompanionViews(this, dark)
-        val panel = ui.column().apply { setPadding(dp(if (expanded) 16 else 6), dp(if (expanded) 16 else 6), dp(if (expanded) 16 else 6), dp(if (expanded) 16 else 6)) }
-        val path = CompanionAppearance.resolve(CompanionAppearance.avatar(this), task?.avatarPath, avatar)
-        val title = task?.characterName ?: name
-        val state = if (chatting) "正在回复" else task?.statusLabel ?: "陪着你"
+        val panel = ui.column().apply { setPadding(dp(if (expanded) 12 else 6), dp(if (expanded) 12 else 6), dp(if (expanded) 12 else 6), dp(if (expanded) 12 else 6)) }
+        val path = CompanionAppearance.resolve(CompanionAppearance.avatar(this), if (workMode) task?.avatarPath else null, avatar)
+        val title = if (workMode) task?.characterName ?: name else name
+        val state = if (chatting) "正在回复" else if (workMode) task?.statusLabel ?: "可以交代一件事" else if (PetMessages.notice.value.isNotBlank()) "有话想和你说" else "陪着你"
         if (!expanded) {
             val bubble = FrameLayout(this)
-            val photo = ui.avatar(path, 52, title).apply { contentDescription = "$title，$state，点按展开，长按菜单" }
+            val photo = ui.avatar(path, 52, title).apply { contentDescription = title + "，" + state + "，点按展开，长按菜单" }
             bubble.addView(photo); attachDrag(photo)
-            val dot = View(this).apply {
-                background = GradientDrawable().apply { setColor(if (task?.state in setOf(TaskState.APPROVAL, TaskState.QUESTION, TaskState.FAILED)) Color.rgb(231, 155, 64) else ui.accent); shape = GradientDrawable.OVAL; setStroke(dp(2), ui.surface) }
-            }
-            bubble.addView(dot, FrameLayout.LayoutParams(dp(12), dp(12), Gravity.BOTTOM or Gravity.END))
+            bubble.addView(View(this).apply { background = GradientDrawable().apply { setColor(ui.accent); shape = GradientDrawable.OVAL; setStroke(dp(2), ui.surface) } },
+                FrameLayout.LayoutParams(dp(12), dp(12), Gravity.BOTTOM or Gravity.END))
             panel.addView(bubble)
         } else {
             panel.background = ui.shape(ui.surface, 24); panel.elevation = dp(8).toFloat()
+            val grip = FrameLayout(this).apply { contentDescription = "拖动悬浮窗口" }
+            grip.addView(View(this).apply { background = ui.shape(ui.muted, 3) }, FrameLayout.LayoutParams(dp(36), dp(4), Gravity.CENTER))
+            attachDrag(grip, false)
+            panel.addView(grip, LinearLayout.LayoutParams(-1, dp(24)))
             panel.addView(ui.header(title, state, path,
-                { expanded = false; shortcut = false; PetMessages.notice.value = ""; render() },
-                { stopSelf() }, ::attachDrag))
-            val body = ui.column().apply { setPadding(0, dp(16), 0, dp(4)) }
+                { expanded = false; shortcut = false; PetMessages.notice.value = ""; render() }, { stopSelf() }, { attachDrag(it, false) }))
+            val tabs = ui.row().apply { gravity = Gravity.TOP }
+            listOf("聊天", "帮我办事").forEachIndexed { i, label ->
+                tabs.addView(ui.action(label, (i == 1) == workMode) { workMode = i == 1; shortcut = false; quickReply = ""; render() },
+                    LinearLayout.LayoutParams(0, dp(44), 1f).apply { topMargin = dp(8); marginEnd = dp(4) })
+            }
+            panel.addView(tabs)
+            val body = ui.column().apply { setPadding(0, dp(10), 0, dp(8)) }
             fun action(text: String, primary: Boolean = false, click: () -> Unit) { body.addView(ui.action(text, primary, click)) }
             if (shortcut) {
-                action("任务中心") { startActivity(TaskNotices.openIntent(this)) }
-                if (task?.let { TaskActions.active(it.state) } == true) action("暂停任务") { task?.let { respond(it, "pause") } }
-                action("陪伴设置") { TaskNavigation.companion.value = true; startActivity(TaskNotices.openIntent(this)) }
-            } else {
-                task?.let { t ->
-                    body.addView(ui.label(t.goal, 15).apply { setTypeface(typeface, android.graphics.Typeface.BOLD); maxLines = 2 })
-                    if (t.state == TaskState.APPROVAL && t.steps.getOrNull(t.cursor) != null) {
-                        val step = t.steps[t.cursor]
-                        val description = buildString {
-                            append(com.miniichat.tasks.agent.AgentPolicy.specs[step.tool]?.title ?: step.tool)
-                            if (step.source.isNotBlank()) append("\n从：${step.source}")
-                            if (step.destination.isNotBlank()) append("\n到：${step.destination}")
-                            step.arguments.filterKeys { it !in setOf("snapshot", "node") }.forEach { (key, value) -> append("\n$key：$value") }
-                            append("\n${step.reason}")
-                        }
-                        body.addView(ui.label(description, 13, true).apply { setPadding(0, dp(8), 0, dp(4)) })
-                    } else if (t.detail.isNotBlank()) body.addView(ui.label(t.detail, 13, true).apply { setPadding(0, dp(8), 0, dp(4)) })
+                action("打开任务列表") { startActivity(TaskNotices.openIntent(this)) }
+                action("头像与权限设置") { TaskNavigation.companion.value = true; startActivity(TaskNotices.openIntent(this)) }
+            } else if (workMode) {
+                if (pendingGoal.isNotBlank()) {
+                    body.addView(ui.label("交给我：" + pendingGoal))
+                    body.addView(ui.label("文件范围：" + FolderSelection.label(pendingFolder) + "。允许按需读取，并将必要文字发送给当前模型？", 13, true))
+                    action(if (submitting) "正在保存…" else "允许并开始", true) { if (!submitting) submitTask() }
+                    action("先不做") { if (!submitting) { pendingGoal = ""; render() } }
+                } else task?.let { t ->
+                    body.addView(ui.label(t.goal, 15))
+                    body.addView(ui.label(t.detail, 13, true).apply { setPadding(0, dp(8), 0, dp(8)) })
                     when (t.state) {
                         TaskState.APPROVAL -> {
                             action("允许一次", true) { respond(t, "approve") }
                             if (t.approvedSuggestion && (t.engineVersion < 2 || t.steps.getOrNull(t.cursor)?.let { com.miniichat.tasks.agent.AgentPolicy.canRemember(it) } == true))
-                                action("此范围内以后允许") { respond(t, "always") }
+                                action("此范围内同类操作以后允许") { respond(t, "always") }
                             action("取消任务") { respond(t, "cancel") }
                         }
                         TaskState.QUESTION -> {
-                            if (t.neededPermission == "handoff") action("打开操作", true) { startActivity(TaskNotices.openIntent(this)) }
+                            if (t.neededPermission == "handoff") action("打开系统操作", true) { startActivity(TaskNotices.openIntent(this)) }
                             t.steps.getOrNull(t.cursor)?.options?.forEach { option -> action(option) { TaskActions.respond(this, t.id, "answer", option, t.approvalToken) } }
                         }
-                        TaskState.PERMISSION -> action("去授权", true) { startActivity(TaskNotices.openIntent(this)) }
-                        TaskState.FAILED, TaskState.PAUSED -> action("继续任务", true) { respond(t, "resume") }
-                        else -> Unit
+                        TaskState.PERMISSION -> action("去系统授权", true) { TaskNavigation.permission.value = t.neededPermission; startActivity(TaskNotices.openIntent(this)) }
+                        TaskState.FAILED, TaskState.PAUSED -> action("继续", true) { respond(t, "resume") }
+                        else -> if (TaskActions.active(t.state)) action("暂停") { respond(t, "pause") }
                     }
+                } ?: body.addView(ui.label("整理各种文件、查资料、写清单……直接告诉我。重要操作会先问你。"))
+                action("选择文件夹 / 更多权限") { startActivity(TaskNotices.openIntent(this)) }
+            } else {
+                val messages = conversation?.messages.orEmpty().takeLast(30)
+                if (messages.isEmpty()) body.addView(ui.label(PetMessages.notice.value.ifBlank { "我在，想聊点什么？" }))
+                messages.forEach { message ->
+                    body.addView(ui.label(if (message.role == "user") "你" else name, 11, true).apply { setPadding(0, dp(8), 0, dp(4)) })
+                    body.addView(ui.label(message.content.ifBlank { "[图片消息，请在应用内查看]" }).apply {
+                        background = ui.shape(ui.inset, 14); setPadding(dp(12), dp(10), dp(12), dp(10)); setTextIsSelectable(true)
+                    })
                 }
-                if (PetMessages.notice.value.isNotBlank()) body.addView(ui.label(PetMessages.notice.value).apply { setPadding(0, dp(12), 0, dp(12)) })
-                if (quickReply.isNotBlank()) body.addView(ui.label(quickReply).apply { setPadding(0, dp(12), 0, dp(12)) })
-                if (task == null && quickReply.isBlank() && PetMessages.notice.value.isBlank()) body.addView(ui.label("我在。有什么想说的？", 15).apply { setPadding(0, dp(8), 0, dp(16)) })
-                val input = EditText(this).apply {
-                    tag = "draft"; hint = "说点什么…"; setText(draft); textSize = 15f
-                    setTextColor(ui.ink); setHintTextColor(ui.muted); maxLines = 3
-                    background = ui.shape(ui.inset, 14); setPadding(dp(12), dp(12), dp(12), dp(12))
-                    layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) }
-                    setOnFocusChangeListener { _, focused -> if (focused) {
-                        params.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        view?.let { wm.updateViewLayout(it, params) }
-                    } }
-                    setOnTouchListener { v, event ->
-                        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                            params.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                            view?.let { wm.updateViewLayout(it, params) }; v.requestFocus()
-                            v.post { (getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).showSoftInput(v, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT) }
-                        }
-                        if (event.actionMasked == MotionEvent.ACTION_UP) v.performClick()
-                        false
-                    }
+                if (messages.isNotEmpty()) action("在应用内查看完整聊天") {
+                    val intent = Intent(this, com.miniichat.MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        .putExtra(com.miniichat.proactive.ProactiveNotifications.EXTRA_SOURCE, "normal")
+                        .putExtra(com.miniichat.proactive.ProactiveNotifications.EXTRA_CONVERSATION, conversationId)
+                    startActivity(intent)
                 }
-                body.addView(input)
-                val actions = ui.row()
-                actions.addView(ui.action("办件事") { TaskNavigation.chatDraft.value = input.text.toString(); startActivity(TaskNotices.openIntent(this)); expanded = false; render() },
-                    LinearLayout.LayoutParams(0, -2, 1f).apply { topMargin = dp(8); marginEnd = dp(8) })
-                actions.addView(ui.action(if (chatting) "回复中…" else "发送", true) {
-                    val text = input.text.toString().trim()
-                    if (text.isNotEmpty() && !chatting) { draft = ""; input.setText(""); chat(text) }
-                }.apply { isEnabled = !chatting }, LinearLayout.LayoutParams(0, -2, 1f).apply { topMargin = dp(8) })
-                body.addView(actions)
             }
-            panel.addView(ui.scroll(body, (resources.displayMetrics.heightPixels * 0.5).toInt()))
+            if (quickReply.isNotBlank()) body.addView(ui.label(quickReply, 13, true).apply { setPadding(0, dp(8), 0, dp(8)) })
+            val scroll = ScrollView(this).apply { addView(body); isFillViewport = false; isVerticalScrollBarEnabled = true }
+            panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(6) })
+            if (!workMode) scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+            val footer = ui.row()
+            val input = EditText(this).apply {
+                tag = "draft"; hint = if (workMode) "交代事情，或回答当前问题…" else "和" + name + "说句话…"
+                setText(draft); textSize = 14f; maxLines = 3; setTextColor(ui.ink); setHintTextColor(ui.muted)
+                background = ui.shape(ui.inset, 12); setPadding(dp(10), dp(10), dp(10), dp(10))
+                setOnTouchListener { v, event ->
+                    if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                        params.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                        view?.let { wm.updateViewLayout(it, params) }; v.requestFocus()
+                        v.post { (getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).showSoftInput(v, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT) }
+                    }
+                    if (event.actionMasked == MotionEvent.ACTION_UP) v.performClick()
+                    false
+                }
+            }
+            footer.addView(input, LinearLayout.LayoutParams(0, -2, 1f))
+            footer.addView(ui.action(if (chatting || submitting) "稍候" else if (workMode) "提交" else "发送", true) {
+                val text = input.text.toString().trim()
+                if (text.isNotEmpty() && !chatting && !submitting) {
+                    draft = ""; input.setText("")
+                    if (!workMode) chat(text)
+                    else if (task?.state == TaskState.QUESTION) { val t = task!!; TaskActions.respond(this, t.id, "answer", text, t.approvalToken) }
+                    else { pendingGoal = text; pendingFolder = FolderSelection.saved(this); render() }
+                }
+            }.apply { isEnabled = !chatting && !submitting }, LinearLayout.LayoutParams(dp(64), -2).apply { marginStart = dp(8) })
+            panel.addView(footer, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+            // Keep the fixed input footer above the IME; the conversation alone scrolls.
+            androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(panel) { _, insets ->
+                val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                val ime = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime()).bottom
+                availableBottom = resources.displayMetrics.heightPixels - maxOf(ime, bars.bottom)
+                val available = resources.displayMetrics.heightPixels - maxOf(ime, bars.bottom) - bars.top - dp(16)
+                val height = minOf(dp(560), available).coerceAtLeast(dp(160))
+                if (view === panel && expanded && params.height != height) {
+                    params.height = height
+                    params.y = params.y.coerceIn(bars.top, maxOf(bars.top, available - height + bars.top))
+                    panel.post { if (view === panel && !destroyed) runCatching { wm.updateViewLayout(panel, params) } }
+                }
+                insets
+            }
         }
         if (old != null) runCatching { wm.removeView(old) }
         view = panel
-        params.width = if (expanded) minOf(dp(328), resources.displayMetrics.widthPixels - dp(24)) else dp(64)
-        params.height = WindowManager.LayoutParams.WRAP_CONTENT
-        params.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-        panel.measure(View.MeasureSpec.makeMeasureSpec(params.width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(resources.displayMetrics.heightPixels, View.MeasureSpec.AT_MOST))
+        params.width = if (expanded) minOf(dp(360), resources.displayMetrics.widthPixels - dp(24)) else dp(64)
+        params.height = if (expanded) { if (focused && previousHeight > 0) previousHeight else minOf(dp(560), resources.displayMetrics.heightPixels - dp(64)) } else WindowManager.LayoutParams.WRAP_CONTENT
+        params.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or if (expanded && focused) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        val estimatedHeight = if (expanded) params.height else dp(64)
         params.x = params.x.coerceIn(0, (resources.displayMetrics.widthPixels - params.width).coerceAtLeast(0))
-        params.y = params.y.coerceIn(0, (resources.displayMetrics.heightPixels - panel.measuredHeight - dp(32)).coerceAtLeast(0))
+        params.y = params.y.coerceIn(dp(24), (resources.displayMetrics.heightPixels - estimatedHeight - dp(32)).coerceAtLeast(dp(24)))
         runCatching { wm.addView(panel, params) }.onFailure { stopSelf() }
+        if (focused && expanded) panel.findViewWithTag<EditText>("draft")?.requestFocus()
     }
-    private fun attachDrag(handle: View) {
+    private fun submitTask() {
+        val goal = pendingGoal; val folder = pendingFolder
+        submitting = true; render()
+        serviceScope.launch {
+            try {
+                val created = withContext(Dispatchers.IO) { TaskActions.create(this@PetOverlayService, goal, rootDirectory = folder) }
+                task = created; pendingGoal = ""; quickReply = "已保存，会在后台继续；需要确认时来问你。"
+            } catch (e: CancellationException) { throw e
+            } catch (e: Exception) { quickReply = e.message?.take(150) ?: "暂时无法创建任务" }
+            finally { submitting = false; render() }
+        }
+    }
+    private fun attachDrag(handle: View, toggleOnTap: Boolean = true) {
         var sx = 0f; var sy = 0f; var x = 0; var y = 0; var down = 0L; var dragged = false
         handle.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> { sx = event.rawX; sy = event.rawY; x = params.x; y = params.y; down = event.eventTime; dragged = false }
                 MotionEvent.ACTION_MOVE -> {
                     if (kotlin.math.abs(event.rawX - sx) + kotlin.math.abs(event.rawY - sy) > dp(8)) dragged = true
-                    if (dragged) { params.x = (x + event.rawX - sx).toInt(); params.y = (y + event.rawY - sy).toInt()
+                    if (dragged) {
+                        params.x = (x + event.rawX - sx).toInt().coerceIn(0, (resources.displayMetrics.widthPixels - params.width).coerceAtLeast(0))
+                        val bottom = if (expanded && availableBottom > 0) availableBottom else resources.displayMetrics.heightPixels
+                        params.y = (y + event.rawY - sy).toInt().coerceIn(dp(24), (bottom - (if (expanded) params.height else dp(64)) - dp(16)).coerceAtLeast(dp(24)))
                         view?.let { runCatching { wm.updateViewLayout(it, params) } } }
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!dragged) { handle.performClick(); shortcut = event.eventTime - down > 500; expanded = if (shortcut) true else !expanded }
-                    else params.x = if (params.x < resources.displayMetrics.widthPixels / 2) 0 else resources.displayMetrics.widthPixels - params.width
+                    if (!dragged && toggleOnTap) { handle.performClick(); shortcut = event.eventTime - down > 500; expanded = if (shortcut) true else !expanded }
+                    else if (dragged && !expanded) params.x = if (params.x < resources.displayMetrics.widthPixels / 2) 0 else resources.displayMetrics.widthPixels - params.width
                     TaskActions.preferences(this).edit().putInt("pet_x", params.x).putInt("pet_y", params.y).apply()
-                    render()
+                    if (!dragged && toggleOnTap) render()
+                    else view?.let { runCatching { wm.updateViewLayout(it, params) } }
                 }
             }; true
         }
@@ -245,22 +316,15 @@ class PetOverlayService : Service() {
         chatting = true; quickReply = "正在回复…"; render()
         serviceScope.launch {
             try {
-                val answer = withContext(Dispatchers.IO) {
-                    val settings = SettingsRepository(this@PetOverlayService).settings.first()
-                    val provider = ProviderStore(this@PetOverlayService).snapshot().firstOrNull { it.id == settings.activeProviderId && it.enabled }
-                        ?: error("请先选择 AI 服务")
-                    val assistant = AssistantStore(this@PetOverlayService).snapshot().firstOrNull { it.id == settings.activeAssistantId }
-                    val client = LlmClient()
-                    try { client.completeDetailed(provider, settings.activeModel,
-                        listOf(ChatMessage("system", assistant?.systemPrompt.orEmpty() + "\n你正在手机悬浮窗快速聊天，没有执行工具。不要声称已经操作手机，需要办事请让用户点交给我做。")) + quickHistory.takeLast(12) + ChatMessage("user", text.take(4000)),
-                        temperature = 0.7f, structuredJson = false, requestTimeoutMillis = 120000, maxOutputTokens = 1200).content
-                    } finally { client.close() }
-                }
-                quickHistory += ChatMessage("user", text); quickHistory += ChatMessage("assistant", answer)
-                quickReply = answer
+                val saved = withContext(Dispatchers.IO) { CompanionConversation.send(this@PetOverlayService, text, conversationId) }
+                conversation = saved; conversationId = saved.id; quickReply = ""; PetMessages.notice.value = ""
             } catch (e: CancellationException) { throw e
-            } catch (_: Exception) { quickReply = "暂时无法回复，请检查网络和当前 AI 服务。任务进度不受影响。"
-            } finally { chatting = false; render() }
+            } catch (e: Exception) {
+                withContext(Dispatchers.IO) { runCatching { com.miniichat.error.AppErrorStore(this@PetOverlayService).record(e,
+                    com.miniichat.error.AppErrorContext(area = com.miniichat.error.ErrorArea.CHAT, operation = com.miniichat.error.ErrorOperation.SEND_MESSAGE)) } }
+                quickReply = "暂时没有收到回复。已发送的消息保留在聊天记录；详情可在错误报告查看。"
+            }
+            finally { chatting = false; render() }
         }
     }
     private fun respond(task: PhoneTask, action: String) { TaskActions.respond(this, task.id, action, token = task.approvalToken) }

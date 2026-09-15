@@ -19,30 +19,23 @@ object ProactiveScheduler {
         val appContext = context.applicationContext
         val settings = SettingsRepository(appContext).settings.first()
         val workManager = WorkManager.getInstance(appContext)
-        if (!settings.proactiveMessagesEnabled) {
-            workManager.cancelUniqueWork(UNIQUE_WORK)
-            return
-        }
 
         val now = System.currentTimeMillis()
         val assistantStore = AssistantStore(appContext)
         var assistants = assistantStore.snapshot()
         var assistantsChanged = false
         assistants = assistants.map { assistant ->
-            if (assistant.proactiveEnabled && assistant.nextProactiveCheckAt <= 0L) {
+            if (assistant.canContact(settings.proactiveMessagesEnabled) && assistant.nextProactiveCheckAt <= 0L) {
                 assistantsChanged = true
                 assistant.copy(
-                    nextProactiveCheckAt = now + ProactivePolicy.nextDelayMillis(
-                        settings.proactiveFrequency,
-                        Random.nextDouble()
-                    )
+                    nextProactiveCheckAt = now + ProactivePolicy.initialDelayMillis(Random.nextDouble())
                 )
             } else assistant
         }
         if (assistantsChanged) assistantStore.save(assistants)
 
         val normalTimes = assistants.asSequence()
-            .filter { it.proactiveEnabled }
+            .filter { it.canContact(settings.proactiveMessagesEnabled) }
             .map { it.nextProactiveCheckAt }
             .filter { it > 0L }
         val earliest = normalTimes.minOrNull()

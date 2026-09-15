@@ -54,7 +54,7 @@ object ProactiveNotifications {
         avatarPath: String?,
         destination: ProactiveDestination
     ) {
-        com.miniichat.tasks.PetMessages.show("$characterName：$message")
+        com.miniichat.tasks.PetMessages.show("$characterName：$message", destination.conversationId)
         if (AppVisibility.isForeground) {
             ProactiveNavigation.showForegroundNotice("$characterName：$message")
             return
@@ -70,7 +70,7 @@ object ProactiveNotifications {
                 NotificationChannel(
                     CHANNEL_ID,
                     "角色消息",
-                    NotificationManager.IMPORTANCE_DEFAULT
+                    NotificationManager.IMPORTANCE_HIGH
                 ).apply { description = "人物主动发来的消息" }
             )
         }

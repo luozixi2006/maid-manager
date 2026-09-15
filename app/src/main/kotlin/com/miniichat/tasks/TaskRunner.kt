@@ -41,7 +41,7 @@ object TaskActions {
             engineVersion = 2, rootDirectory = rootDirectory,
             allowedPackages = preferences(context).getStringSet("agent_apps", emptySet()).orEmpty().toList(),
             providerEndpoint = provider.baseUrl, model = settings.activeModel,
-            characterName = assistant?.displayName ?: "女仆", avatarPath = assistant?.avatarPath.orEmpty(),
+            characterName = assistant?.displayName ?: "女仆", avatarPath = assistant?.avatarPath.orEmpty(), personaPrompt = assistant?.systemPrompt.orEmpty(),
             approvedSuggestion = !suggestion, sourceRule = ruleId,
             state = if (suggestion) TaskState.APPROVAL else TaskState.QUEUED,
             detail = if (suggestion) "要帮你处理这件事吗？确认后根据目标按需读取授权范围的数据。" else "正在准备规划；按需检查权限")

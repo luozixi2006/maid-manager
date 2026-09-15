@@ -66,8 +66,10 @@ internal class CompanionViews(val context: Context, dark: Boolean) {
         background = RippleDrawable(ColorStateList.valueOf(0x22000000), shape(Color.TRANSPARENT, 22), null)
     }
     fun header(name: String, state: String, path: String, collapse: () -> Unit, close: () -> Unit, drag: (View) -> Unit): LinearLayout = row().apply {
+        contentDescription = "拖动窗口标题栏"; drag(this)
         val image = avatar(path, 40, name); image.contentDescription = "$name 的头像，拖动移动"; drag(image); addView(image)
         addView(column().apply {
+            contentDescription = "拖动窗口标题"; drag(this)
             addView(label(name, 16).apply { setTypeface(typeface, Typeface.BOLD); maxLines = 1 })
             addView(label(state, 12, true).apply { setPadding(0, dp(5), 0, 0) })
         }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })

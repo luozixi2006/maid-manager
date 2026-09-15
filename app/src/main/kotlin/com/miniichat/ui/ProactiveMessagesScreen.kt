@@ -42,8 +42,6 @@ fun ProactiveMessagesScreen(
     onSave: (AppSettings) -> Unit
 ) {
     val context = LocalContext.current
-    var enabled by remember(settings) { mutableStateOf(settings.proactiveMessagesEnabled) }
-    var frequency by remember(settings) { mutableStateOf(settings.proactiveFrequency) }
     var dndStart by remember(settings) { mutableStateOf(formatMinutes(settings.proactiveDndStartMinutes)) }
     var dndEnd by remember(settings) { mutableStateOf(formatMinutes(settings.proactiveDndEndMinutes)) }
     var validationError by remember { mutableStateOf<String?>(null) }
@@ -55,34 +53,12 @@ fun ProactiveMessagesScreen(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
             .padding(WindowInsets.statusBars.asPaddingValues())
     ) {
-        SettingsTopBar(stringResource(R.string.proactive_messages), onBack)
+        SettingsTopBar("消息通知与安静时段", onBack)
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Disclosure("主动消息说明") { Text(stringResource(R.string.proactive_messages_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(stringResource(R.string.allow_proactive_messages), Modifier.weight(1f))
-                AppSwitch(checked = enabled, onCheckedChange = { enabled = it })
-            }
-
-            Text(stringResource(R.string.proactive_frequency), style = MaterialTheme.typography.titleMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(
-                    "rare" to R.string.frequency_rare,
-                    "occasional" to R.string.frequency_occasional,
-                    "frequent" to R.string.frequency_frequent
-                ).forEach { (value, label) ->
-                    FilterChip(
-                        selected = frequency == value,
-                        onClick = { frequency = value },
-                        label = { Text(stringResource(label)) }
-                    )
-                }
-            }
+            Text("是否主动联系、聊什么，跟随各个人设。这里仅设置免打扰，不需要另外开启总开关。", style = MaterialTheme.typography.bodyMedium)
 
             Text(stringResource(R.string.do_not_disturb), style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -125,13 +101,11 @@ fun ProactiveMessagesScreen(
                     }
                     onSave(
                         settings.copy(
-                            proactiveMessagesEnabled = enabled,
-                            proactiveFrequency = frequency,
                             proactiveDndStartMinutes = start,
                             proactiveDndEndMinutes = end
                         )
                     )
-                    if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
                         PackageManager.PERMISSION_GRANTED
                     ) {

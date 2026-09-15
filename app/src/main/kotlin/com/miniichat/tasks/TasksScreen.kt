@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun TasksScreen(onBack: () -> Unit) {
+fun TasksScreen(onBack: () -> Unit, onPersona: () -> Unit = {}) {
     val context = LocalContext.current
     val store = remember { TaskStore.of(context) }
     val revision by store.revision.collectAsState()
@@ -37,7 +37,11 @@ fun TasksScreen(onBack: () -> Unit) {
     var rules by remember { mutableStateOf(emptyList<TriggerRule>()) }
     var goal by rememberSaveable { mutableStateOf(draft) }
     var scopePath by rememberSaveable { mutableStateOf("") }
-    var rootDirectory by rememberSaveable { mutableStateOf("Download") }
+    var rootDirectory by rememberSaveable { mutableStateOf(FolderSelection.saved(context)) }
+    var choosingFolder by remember { mutableStateOf(false) }
+    var browsingPath by remember { mutableStateOf(rootDirectory) }
+    var eventFolder by rememberSaveable { mutableStateOf(FolderSelection.saved(context)) }
+    var choosingEventFolder by remember { mutableStateOf(false) }
     var consent by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
@@ -63,6 +67,19 @@ fun TasksScreen(onBack: () -> Unit) {
             if (action == Settings.ACTION_APP_NOTIFICATION_SETTINGS) putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
         }) }.onFailure { message = "请在系统应用设置中手动开启此权限" }
     }
+    fun grantTaskPermission(kind: String) {
+        when (kind) {
+            "files" -> if (Build.VERSION.SDK_INT >= 30) settings(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, true)
+                else runtime.launch(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE))
+            "accessibility" -> settings(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            "notifications" -> settings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+            else -> settings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, true)
+        }
+    }
+    val requestedPermission by TaskNavigation.permission.collectAsState()
+    LaunchedEffect(requestedPermission) { if (requestedPermission.isNotBlank()) {
+        grantTaskPermission(requestedPermission); TaskNavigation.permission.value = ""
+    } }
     fun returnToApprovedApp(task: PhoneTask) {
         val step = task.steps.getOrNull(task.cursor) ?: return
         if (task.engineVersion < 2 || com.miniichat.tasks.agent.AgentPolicy.specs[step.tool]?.permission != "accessibility") return
@@ -74,11 +91,26 @@ fun TasksScreen(onBack: () -> Unit) {
     }
     val filesGranted = remember(refresh) { DownloadsTools(context, "").permitted() }
     val overlayGranted = remember(refresh) { Settings.canDrawOverlays(context) }
+    fun chooseFolder(forEvent: Boolean = false, initialPath: String = rootDirectory) {
+        if (!filesGranted) {
+            message = "请先在系统中允许文件访问，回来后点“选择文件夹”。不会扩大已创建任务的范围。"
+            if (Build.VERSION.SDK_INT >= 30) settings(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, true)
+            else runtime.launch(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE))
+        } else if (forEvent) choosingEventFolder = true else { browsingPath = initialPath; choosingFolder = true }
+    }
+    if (choosingFolder || choosingEventFolder) {
+        FolderPicker(if (choosingEventFolder) eventFolder else browsingPath,
+        { choosingFolder = false; choosingEventFolder = false }, { folder ->
+            if (choosingEventFolder) eventFolder = folder else { rootDirectory = folder; scopePath = ""; consent = false; FolderSelection.remember(context, folder) }
+            choosingFolder = false; choosingEventFolder = false
+        })
+        return
+    }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.statusBarsPadding()) {
             SettingsTopBar("任务与陪伴", onBack)
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp).background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(14.dp)).padding(4.dp)) {
-                listOf("任务", "陪伴", "自动").forEachIndexed { index, text ->
+                listOf("帮我办事", "屏幕陪伴", "事件提醒").forEachIndexed { index, text ->
                     TextButton(onClick = { tab = index }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.textButtonColors(containerColor = if (tab == index) MaterialTheme.colorScheme.surface else androidx.compose.ui.graphics.Color.Transparent,
                             contentColor = if (tab == index) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)) { Text(text) }
@@ -89,10 +121,13 @@ fun TasksScreen(onBack: () -> Unit) {
                 when (tab) {
                     0 -> {
                         SectionHeading("有什么需要我做？")
-                        AppTextField(goal, { goal = it }, label = { Text("例如：把学校 PDF 按课程整理，名字改清楚") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
-                        Disclosure("文件范围 · $rootDirectory${if (scopePath.isNotBlank()) "/$scopePath" else ""}") {
-                            AppTextField(rootDirectory, { rootDirectory = it }, label = { Text("共享目录") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                            AppTextField(scopePath, { scopePath = it }, label = { Text("子文件夹（可选）") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        Text("整理文件、查资料、写文本或准备日程。需要你确认时会来问你。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        AppTextField(goal, { goal = it }, label = { Text("告诉我想做什么") }, placeholder = { Text("例如：按类型整理下载内容，保留所有原文件") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
+                        AppGroup {
+                            PreferenceRow("文件夹 · ${FolderSelection.label(rootDirectory)}", "自动记住选择 · 不需要手填英文路径") {
+                                TextButton({ chooseFolder() }) { Text("选择文件夹") }
+                            }
+                            Text("实际位置：$rootDirectory", Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Row { Checkbox(consent, { consent = it }); Text("允许读取所选目录，并将必要文字交给当前模型。页面与通知正文另行确认。", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         Button(modifier = Modifier.fillMaxWidth(), enabled = consent && goal.isNotBlank() && !busy, onClick = {
@@ -112,13 +147,20 @@ fun TasksScreen(onBack: () -> Unit) {
                                         Text(task.goal, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                                         TextButton(onClick = { selected = if (selected == task.id) null else task.id }) { Text(if (selected == task.id) "收起" else "查看") }
                                     }
-                                    Text(if (task.noticeOnly) "主动消息 · 没有读取文件" else "${task.state.label} · ${task.cursor}/${task.steps.size} 步 · ${task.rootDirectory}/${task.scope}", style = MaterialTheme.typography.labelMedium)
+                                    Text(if (task.noticeOnly) "事件提醒 · 没有读取文件" else "${task.state.label} · 已完成 ${task.cursor} 步 · ${FolderSelection.label(task.rootDirectory + if (task.scope.isBlank()) "" else "/${task.scope}")}", style = MaterialTheme.typography.labelMedium)
+                                    val createdFolders = task.steps.filter { it.tool == "mkdir" && it.done }.map { it.resolvedTarget.ifBlank { it.destination } }.filter { it.isNotBlank() }.distinct()
+                                    if (createdFolders.isNotEmpty()) Disclosure("打开本次创建的文件夹 · ${createdFolders.size}") {
+                                        createdFolders.forEach { relative ->
+                                            val actual = listOf(task.rootDirectory, task.scope, relative).filter { it.isNotBlank() }.joinToString("/")
+                                            TextButton({ chooseFolder(initialPath = actual) }) { Text("打开：${FolderSelection.label(actual)}") }
+                                        }
+                                    }
                                     if (selected != task.id) Text(task.detail, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                     if (selected == task.id) {
                                     if (task.state in setOf(TaskState.APPROVAL, TaskState.QUESTION, TaskState.PERMISSION, TaskState.FAILED)) Text(task.detail, style = MaterialTheme.typography.bodyMedium)
                                     else Text(task.detail, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                                     when (task.state) {
-                                        TaskState.PERMISSION -> TextButton(onClick = { tab = 1 }) { Text("开启所需权限") }
+                                        TaskState.PERMISSION -> TextButton(onClick = { grantTaskPermission(task.neededPermission) }) { Text("开启所需权限") }
                                         TaskState.APPROVAL -> {
                                             TextButton(onClick = {
                                                 TaskActions.respond(context, task.id, "approve", token = task.approvalToken)
@@ -156,15 +198,13 @@ fun TasksScreen(onBack: () -> Unit) {
                                     Disclosure("执行记录") {
                                         Text(task.detail, style = MaterialTheme.typography.bodyMedium)
                                         Text("模型：${task.model}\n服务在任务创建时锁定。", style = MaterialTheme.typography.bodySmall)
-                                        Text(task.history.joinToString("\n").ifBlank { "还没有执行文件操作" }, style = MaterialTheme.typography.bodySmall)
+                                        Text(task.history.joinToString("\n").ifBlank { "还没有执行操作" }, style = MaterialTheme.typography.bodySmall)
                                     }
                                     }
                                 }
                             }
                         }
-                    }
-                    1 -> {
-                        CompanionSettings(refresh, { settings(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, true) }, { message = it })
+                        Disclosure("办事权限 · 需要时再开启") {
                         SectionHeading("访问权限")
                         AppGroup {
                             PreferenceRow("文件访问", if (filesGranted) "已允许" else "需要时再开启") {
@@ -202,17 +242,28 @@ fun TasksScreen(onBack: () -> Unit) {
                             Text(approvals.joinToString("\n") { it.removePrefix("approve:").removePrefix("agent:") }.ifBlank { "还没有自动批准的操作" }, style = MaterialTheme.typography.bodySmall)
                             TextButton(onClick = { TaskActions.preferences(context).edit().apply { approvals.forEach { remove(it) } }.commit(); refresh++ }) { Text("全部撤销") }
                         }
-                        Disclosure("自动触发权限") {
+                        Disclosure("事件提醒所需权限") {
                             PreferenceRow("使用情况访问") { TextButton(onClick = { settings(Settings.ACTION_USAGE_ACCESS_SETTINGS) }) { Text("管理") } }
                             PreferenceRow("识别 Wi-Fi") { TextButton(onClick = { runtime.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) }) { Text("授权") } }
                             TextButton(onClick = { settings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, true) }) { Text("系统应用设置") }
                             Text("指定 Wi-Fi 名称需要精确位置、后台位置和系统定位。匹配任意 Wi-Fi 不需要位置权限。", style = MaterialTheme.typography.bodySmall)
                         }
+                        }
+                    }
+                    1 -> {
+                        CompanionSettings(refresh, { settings(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, true) }, { message = it }, onPersona)
+                        AppGroup {
+                            PreferenceRow("角色消息通知", "离开应用后也能收到问候") {
+                                TextButton(onClick = { if (Build.VERSION.SDK_INT >= 33) runtime.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS)) else settings(Settings.ACTION_APP_NOTIFICATION_SETTINGS) }) { Text("允许通知") }
+                            }
+                        }
                     }
                     2 -> {
                         var creatingRule by rememberSaveable { mutableStateOf(false) }
-                        SectionHeading("自动提醒") { TextButton(onClick = { creatingRule = !creatingRule }) { Text(if (creatingRule) "取消" else "添加") } }
-                        if (rules.isEmpty() && !creatingRule) Text("设置一个时机，让我主动来找你。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        SectionHeading("发生这件事时提醒我") { TextButton(onClick = { creatingRule = !creatingRule }) { Text(if (creatingRule) "取消" else "添加") } }
+                        Text("这是可选的手机事件提醒，不是日常陪伴开关。问候和闲聊跟随人设。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        TextButton(onPersona) { Text("去人设设置主动聊天") }
+                        if (rules.isEmpty() && !creatingRule) Text("例如：出现新文件时问我要不要整理，或充电时提醒休息。", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Disclosure("运行方式与隐私") {
                             Text("事件类型和规则文字交给当前模型判断，不上传通知正文。普通提醒不读文件，整理建议先询问。每条规则至少间隔一小时。", style = MaterialTheme.typography.bodySmall)
                             Text("悬浮头像开启时约15秒检查；关闭后由系统调度，可能延迟或漏检。时间触发不是精确闹钟。", style = MaterialTheme.typography.bodySmall)
@@ -221,7 +272,6 @@ fun TasksScreen(onBack: () -> Unit) {
                         var kind by rememberSaveable { mutableStateOf(TriggerKind.FILES) }
                         var match by rememberSaveable { mutableStateOf("") }
                         var eventGoal by rememberSaveable { mutableStateOf("") }
-                        var eventScope by rememberSaveable { mutableStateOf("") }
                         var expanded by remember { mutableStateOf(false) }
                         var appsExpanded by remember { mutableStateOf(false) }
                         var apps by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
@@ -253,15 +303,18 @@ fun TasksScreen(onBack: () -> Unit) {
                                 else -> "应用包名，如 com.tencent.mm"
                             }) })
                         }
-                        AppTextField(eventGoal, { eventGoal = it }, label = { Text("希望角色考虑做什么") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
-                        AppTextField(eventScope, { eventScope = it }, label = { Text("下载目录内的子文件夹（可留空）") }, modifier = Modifier.fillMaxWidth())
-                        Text("文件触发观察此目录直属 PDF，首次只建立基线。确认建议代表同意向当前服务发送该范围 PDF 摘要。", style = MaterialTheme.typography.bodySmall)
+                        AppTextField(eventGoal, { eventGoal = it }, label = { Text("发生时怎么提醒我") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+                        if (kind == TriggerKind.FILES) {
+                            TextButton({ chooseFolder(true) }) { Text("观察目录：${FolderSelection.label(eventFolder)} · 更换") }
+                            Text("观察目录内新增文件，不限格式；首次只记录基线，不读取正文。", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text("开启后，事件类型和此规则会交给当前模型判断；通知正文不会上传。", style = MaterialTheme.typography.bodySmall)
                         Button(enabled = eventGoal.isNotBlank(), onClick = {
                             runCatching {
-                                ToolPolicy.relative(eventScope.trim(), true); require(eventGoal.length <= 4000)
+                                ToolPolicy.relative(eventFolder); require(eventGoal.length <= 4000)
                                 if (kind == TriggerKind.TIME) java.time.LocalTime.parse(match)
                                 if (kind in setOf(TriggerKind.APP, TriggerKind.NOTIFICATION)) require(match.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+")))
-                                store.rule(TriggerRule(kind = kind, match = match.trim(), goal = eventGoal.trim(), scope = eventScope.trim()))
+                                store.rule(TriggerRule(kind = kind, match = match.trim(), goal = eventGoal.trim(), rootDirectory = eventFolder))
                                 TriggerEngine.schedule(context); eventGoal = ""; creatingRule = false
                             }.onFailure { message = "无法保存规则：请检查时间格式、包名或目录" }
                         }) { Text("同意并开启此规则") }

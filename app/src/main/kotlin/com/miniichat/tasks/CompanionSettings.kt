@@ -16,7 +16,7 @@ import com.miniichat.ui.*
 import kotlinx.coroutines.flow.first
 
 @Composable
-fun CompanionSettings(refresh: Int, openPermission: () -> Unit, onError: (String) -> Unit) {
+fun CompanionSettings(refresh: Int, openPermission: () -> Unit, onError: (String) -> Unit, onPersona: () -> Unit = {}) {
     val context = LocalContext.current
     val running by CompanionRuntime.running.collectAsState()
     var avatar by remember(refresh) { mutableStateOf(CompanionAppearance.avatar(context)) }
@@ -33,6 +33,8 @@ fun CompanionSettings(refresh: Int, openPermission: () -> Unit, onError: (String
         it.firstOrNull()?.let { path -> CompanionAppearance.setAvatar(context, path); avatar = path }
     }, onError)
     SectionHeading("屏幕陪伴")
+    Text("在其他应用上也能和她聊天、收消息，或交代一件事。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    TextButton(onPersona) { Text("到当前人设设置主动问候") }
     AppGroup {
         Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
             PersonAvatar(name, avatar.ifBlank { defaultAvatar }, 64.dp)
@@ -60,6 +62,6 @@ fun CompanionSettings(refresh: Int, openPermission: () -> Unit, onError: (String
     }
     Text("拖动靠边，点按聊天。展开后可直接收起或关闭。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Disclosure("关闭与隐私说明") {
-        Text("关闭头像不会取消任务，也不会自动重新打开。系统任务通知和已启用的事件规则继续有效，可到“自动”页单独关闭。快速聊天关闭后不保留；头像保存在本机，不因任务切换而覆盖。", style = MaterialTheme.typography.bodySmall)
+        Text("关闭头像不会取消任务或人设消息，也不会自动重新打开。日常问候跟随人设；手机事件可到“事件提醒”单独关闭。聊天保存到历史记录；头像保存在本机。", style = MaterialTheme.typography.bodySmall)
     }
 }

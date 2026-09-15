@@ -34,7 +34,7 @@ data class PhonePlan(val steps: List<PhoneStep> = emptyList(), val note: String 
 data class PhoneTask(
     val id: String = UUID.randomUUID().toString(), val goal: String,
     val scope: String = "", val providerId: String, val providerEndpoint: String, val model: String,
-    val characterName: String = "女仆", val avatarPath: String = "",
+    val characterName: String = "女仆", val avatarPath: String = "", val personaPrompt: String = "",
     val state: TaskState = TaskState.QUEUED, val detail: String = "等待扫描已授权目录",
     val inventory: List<FileFact> = emptyList(), val scanned: Boolean = false,
     val steps: List<PhoneStep> = emptyList(), val cursor: Int = 0, val planNote: String = "",
