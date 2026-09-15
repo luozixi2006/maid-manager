@@ -80,6 +80,9 @@ import com.miniichat.data.Conversation
 import com.miniichat.data.Message
 import com.miniichat.data.MessageDeliveryStatus
 import com.miniichat.data.ProviderConfig
+import com.miniichat.data.Attachment
+import com.miniichat.data.LocalImageStore
+import androidx.compose.ui.platform.LocalContext
 import android.net.Uri
 import com.miniichat.tts.TtsPlaybackState
 import com.miniichat.tts.TtsStatus
@@ -90,12 +93,13 @@ fun ChatScreen(
     settings: AppSettings,
     activeProvider: ProviderConfig?,
     assistantName: String,
+    assistantAvatar: String?,
     isStreaming: Boolean,
     streamingOverlay: StreamingOverlay? = null,
     ttsState: TtsPlaybackState,
     supportsReasoning: Boolean,
     onMenu: () -> Unit,
-    onSend: (String) -> Unit,
+    onSend: (String, List<Attachment>) -> Boolean,
     onStop: () -> Unit,
     onRegenerate: () -> Unit,
     onRegenerateFrom: (String) -> Unit = {},
@@ -107,11 +111,18 @@ fun ChatScreen(
     onReasoningEffortChange: (String) -> Unit,
     onSaveImage: (String, Uri) -> Unit,
     onOpenErrors: () -> Unit,
+    onPhotoError: (String) -> Unit,
     onNew: () -> Unit,
     onOpenSettings: () -> Unit,
+    onEditPersona: () -> Unit,
     onPickModel: () -> Unit
 ) {
-    var input by rememberSaveable { mutableStateOf("") }
+    var input by rememberSaveable(conversation?.id) { mutableStateOf("") }
+    var photoPaths by rememberSaveable(conversation?.id) { mutableStateOf(emptyList<String>()) }
+    val context = LocalContext.current
+    val imageStore = remember(context) { LocalImageStore(context) }
+    val photoActions = rememberPhotoActions(conversation?.id ?: "new-chat", 4 - photoPaths.size,
+        onImported = { photoPaths = (photoPaths + it).take(4) }, onError = onPhotoError)
     val listState = rememberLazyListState()
     val rawMessages = conversation?.messages ?: emptyList()
     // Apply in-memory streaming overlay so the assistant message updates per-token
@@ -130,18 +141,19 @@ fun ChatScreen(
     var editingDraft by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(messages.size, isStreaming) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+        if (messages.isNotEmpty() && !listState.isScrollInProgress) listState.animateScrollToItem(messages.lastIndex)
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(MaterialTheme.colorScheme.surface)
             .imePadding()
     ) {
         ChatTopBar(
-            title = conversation?.title?.takeIf { it.isNotBlank() }
-                ?: stringResource(R.string.app_name),
+            title = assistantName,
+            avatarPath = assistantAvatar,
+            onEditPersona = onEditPersona,
             modelLabel = settings.activeModel.ifBlank { stringResource(R.string.select_model) },
             providerLabel = activeProvider?.name,
             onMenu = onMenu,
@@ -150,7 +162,17 @@ fun ChatScreen(
         )
 
         if (messages.isEmpty()) {
-            Spacer(Modifier.weight(1f))
+            Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                PersonAvatar(assistantName, assistantAvatar, 72.dp, Modifier.clickable(onClick = onEditPersona))
+                Spacer(Modifier.height(16.dp))
+                Text(assistantName, style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.height(8.dp))
+                Text("发条消息，或分享一张照片", style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                androidx.compose.material3.TextButton(onClick = onEditPersona) { Text("名字与头像") }
+            }
         } else {
             LazyColumn(
                 state = listState,
@@ -161,6 +183,7 @@ fun ChatScreen(
                 items(messages, key = { it.id }) { msg ->
                     MessageItem(
                         message = msg,
+                        avatarPath = assistantAvatar,
                         senderLabel = if (msg.role == "user") stringResource(R.string.you)
                         else assistantName.ifBlank { stringResource(R.string.default_ai_name) },
                         isLastAssistant = msg.id == messages.lastOrNull()?.id && msg.role == "assistant",
@@ -184,7 +207,11 @@ fun ChatScreen(
                             editingDraft = ""
                         },
                         onDelete = { onDeleteMessage(msg.id) },
-                        onRegenerateFrom = { onRegenerateFrom(msg.id) },
+                        onRegenerateFrom = {
+                            if (msg.role == "user") onRegenerateFrom(msg.id)
+                            else messages.takeWhile { it.id != msg.id }.lastOrNull { it.role == "user" }
+                                ?.let { onRegenerateFrom(it.id) }
+                        },
                         ttsState = ttsState,
                         onPlay = { onPlayMessage(msg) },
                         onOpenErrors = onOpenErrors,
@@ -194,46 +221,14 @@ fun ChatScreen(
             }
         }
 
-        AnimatedVisibility(
-            visible = messages.isNotEmpty()
-                && messages.last().role == "assistant"
-                && !isStreaming
-                && messages.last().content.isNotEmpty()
-                && messages.last().attachments.none { it.type == "image" },
-            enter = fadeIn(), exit = fadeOut()
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp))
-                        .clickable(onClick = onRegenerate)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            stringResource(R.string.regenerate),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                }
-            }
-        }
-
         InputBar(
             value = input,
             onValueChange = { input = it },
             onSend = {
-                val text = input
-                input = ""
-                onSend(text)
+                if (onSend(input, photoPaths.map(imageStore::attachment))) {
+                    input = ""
+                    photoPaths = emptyList()
+                }
             },
             onStop = onStop,
             isStreaming = isStreaming,
@@ -244,7 +239,12 @@ fun ChatScreen(
             onWebEnabledChange = onWebEnabledChange,
             onReasoningEnabledChange = onReasoningEnabledChange,
             onReasoningEffortChange = onReasoningEffortChange,
-            enabled = activeProvider != null && settings.activeModel.isNotBlank()
+            enabled = activeProvider != null && settings.activeModel.isNotBlank(),
+            photos = photoPaths,
+            photoBusy = photoActions.busy,
+            onChoosePhoto = photoActions.choose,
+            onTakePhoto = photoActions.take,
+            onRemovePhoto = { path -> photoPaths = photoPaths - path }
         )
     }
 }
@@ -252,6 +252,8 @@ fun ChatScreen(
 @Composable
 private fun ChatTopBar(
     title: String,
+    avatarPath: String?,
+    onEditPersona: () -> Unit,
     modelLabel: String,
     providerLabel: String?,
     onMenu: () -> Unit,
@@ -274,18 +276,14 @@ private fun ChatTopBar(
                 Icon(Icons.Default.Menu, contentDescription = stringResource(R.string.open_navigation),
                     tint = MaterialTheme.colorScheme.onSurface)
             }
-            Text(
-                title,
-                modifier = Modifier.weight(1f).padding(start = 4.dp, end = 8.dp),
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1, overflow = TextOverflow.Ellipsis
-            )
+            PersonAvatar(title, avatarPath, 36.dp, Modifier.clickable(onClick = onEditPersona))
+            Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                Text(title, Modifier.clickable(onClick = onEditPersona), style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(
                 modifier = Modifier
-                    .weight(0.8f, fill = false)
                     .clickable(onClick = onPickModel)
-                    .padding(horizontal = 4.dp, vertical = 8.dp),
+                    .padding(vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -304,6 +302,7 @@ private fun ChatTopBar(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            }
             IconButton(onClick = onNew) {
                 Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.new_chat),
                     tint = MaterialTheme.colorScheme.onSurface)
@@ -316,6 +315,7 @@ private fun ChatTopBar(
 @Composable
 private fun MessageItem(
     message: Message,
+    avatarPath: String?,
     senderLabel: String,
     isLastAssistant: Boolean,
     isStreaming: Boolean,
@@ -351,10 +351,12 @@ private fun MessageItem(
         AssistantRow(
             message = message,
             senderLabel = senderLabel,
+            avatarPath = avatarPath,
             isLastAssistant = isLastAssistant,
             isStreaming = isStreaming,
             onDelete = onDelete,
             actionsEnabled = !isStreaming,
+            onRegenerate = onRegenerateFrom,
             ttsState = ttsState,
             onPlay = onPlay,
             onOpenErrors = onOpenErrors,
@@ -498,6 +500,12 @@ private fun UserBubble(
                 onSave = onSaveImage,
                 modifier = Modifier.padding(top = if (message.content.isNotEmpty()) 8.dp else 0.dp)
             )
+            if (message.content.isBlank() && message.attachments.isNotEmpty()) {
+                Row {
+                    androidx.compose.material3.TextButton(onClick = onRegenerateFrom, enabled = actionsEnabled) { Text("重新发送") }
+                    androidx.compose.material3.TextButton(onClick = onDelete, enabled = actionsEnabled) { Text("删除") }
+                }
+            }
         }
     }
 }
@@ -506,11 +514,13 @@ private fun UserBubble(
 @Composable
 private fun AssistantRow(
     message: Message,
+    avatarPath: String?,
     senderLabel: String,
     isLastAssistant: Boolean,
     isStreaming: Boolean,
     onDelete: () -> Unit,
     actionsEnabled: Boolean,
+    onRegenerate: () -> Unit,
     ttsState: TtsPlaybackState,
     onPlay: () -> Unit,
     onOpenErrors: () -> Unit,
@@ -521,7 +531,7 @@ private fun AssistantRow(
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            AvatarChip(isUser = false)
+            PersonAvatar(senderLabel, avatarPath, 28.dp)
             Spacer(Modifier.width(8.dp))
             Text(
                 senderLabel,
@@ -629,30 +639,18 @@ private fun AssistantRow(
                     state = ttsState,
                     onClick = onPlay
                 )
+                if (actionsEnabled) {
+                    Spacer(Modifier.width(8.dp))
+                    Row(Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onRegenerate)
+                        .padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Refresh, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(4.dp))
+                        Text("重新回答", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
         }
-    }
-}
-
-@Composable
-private fun AvatarChip(isUser: Boolean) {
-    val bg = if (isUser) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.surfaceVariant
-    val fg = if (isUser) MaterialTheme.colorScheme.onPrimary
-    else MaterialTheme.colorScheme.onSurface
-    Box(
-        modifier = Modifier
-            .size(22.dp)
-            .clip(RoundedCornerShape(7.dp))
-            .background(bg),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            if (isUser) "U" else "女",
-            color = fg,
-            fontWeight = FontWeight.Bold,
-            fontSize = 12.sp
-        )
     }
 }
 

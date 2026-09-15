@@ -108,6 +108,11 @@ fun TtsSettingsScreen(
                 Switch(checked = autoRead, onCheckedChange = { autoRead = it })
             }
             Spacer(Modifier.height(20.dp))
+            Text("IndexTTS 自建服务：地址填写电脑的服务地址；Model 使用服务配置的名称，Voice ID 使用参考音频文件名。免鉴权服务的密钥留空。",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OfficialLink("IndexTTS · 官方项目与参考音频说明", "https://github.com/index-tts/index-tts")
+            OfficialLink("本项目 · 语音接口与填写示例", "https://github.com/luozixi2006/maid-manager/blob/main/docs/TTS_API.md")
+            Spacer(Modifier.height(12.dp))
             Button(
                 onClick = {
                     onSave(settings.copy(

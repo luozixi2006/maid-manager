@@ -16,6 +16,51 @@ import org.junit.Test
 
 class LlmClientDetailedTest {
     @Test
+    fun photosReachHttpWithHistoryAndTextInBothResponseModes() {
+        for (stream in listOf(false, true)) {
+            var actualRequest = ""
+            val photo = "data:image/jpeg;base64,/9j/2Q=="
+            withServer({ request ->
+                actualRequest = request
+                if (stream) MockResponse(200,
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"收到照片\"}}]}\n\ndata: [DONE]\n\n", "text/event-stream")
+                else MockResponse(200, """{"choices":[{"message":{"content":"收到照片"},"finish_reason":"stop"}]}""")
+            }) { server ->
+                val client = LlmClient()
+                val answer = StringBuilder()
+                try {
+                    runBlocking {
+                        client.chatStream(provider(server, "photos", apiKey = ""), AppSettings(stream = stream), "vision-model",
+                            listOf(ChatMessage("system", "人设"), ChatMessage("user", "看这张照片", listOf(photo)),
+                                ChatMessage("assistant", "已看到"), ChatMessage("user", "再看一张", listOf(photo, photo)))
+                        ).collect { it.content?.let(answer::append) }
+                    }
+                } finally { client.close() }
+                assertEquals("收到照片", answer.toString())
+                assertTrue(actualRequest.startsWith("POST /v1/chat/completions "))
+                assertFalse(actualRequest.contains("Authorization:", ignoreCase = true))
+                val json = kotlinx.serialization.json.Json.parseToJsonElement(actualRequest.substringAfter("\r\n\r\n"))
+                    as kotlinx.serialization.json.JsonObject
+                val messages = json["messages"] as kotlinx.serialization.json.JsonArray
+                assertEquals(4, messages.size)
+                assertEquals("人设", ((messages[0] as kotlinx.serialization.json.JsonObject)["content"] as kotlinx.serialization.json.JsonPrimitive).content)
+                val parts = (messages[3] as kotlinx.serialization.json.JsonObject)["content"] as kotlinx.serialization.json.JsonArray
+                assertEquals(3, parts.size)
+                assertTrue(parts.toString().contains(photo))
+                assertFalse(actualRequest.contains("file://"))
+            }
+        }
+    }
+
+    @Test fun imageOnlyRequestIsSupportedAndTextStaysAString() {
+        assertTrue(messageContent(ChatMessage("user", "文字")) is kotlinx.serialization.json.JsonPrimitive)
+        val parts = messageContent(ChatMessage("user", "", listOf("data:image/jpeg;base64,/9j/2Q==")))
+            as kotlinx.serialization.json.JsonArray
+        assertEquals(1, parts.size)
+        assertTrue(parts.toString().contains("image_url"))
+    }
+
+    @Test
     fun successfulCreationPreservesHttpAndFinishMetadata() = withServer({
         MockResponse(
             200,

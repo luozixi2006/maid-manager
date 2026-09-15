@@ -3,6 +3,7 @@ package com.miniichat.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +44,9 @@ fun AppRoot(vm: ChatViewModel) {
     var showModelPicker by rememberSaveable { mutableStateOf(false) }
     var editingProvider by remember { mutableStateOf<ProviderConfig?>(null) }
     var providersReturnScreen by rememberSaveable { mutableStateOf(Screen.Settings) }
+    var personaReturnScreen by rememberSaveable { mutableStateOf(Screen.Settings) }
+    var personaToEdit by rememberSaveable { mutableStateOf<String?>(null) }
+    val screenState = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     var handoffFileName by remember { mutableStateOf("女仆管理器-交接包.json") }
     var handoffDraft by remember { mutableStateOf("") }
     var handoffReturnScreen by rememberSaveable { mutableStateOf(Screen.ChatData) }
@@ -63,7 +67,7 @@ fun AppRoot(vm: ChatViewModel) {
         screen = Screen.Providers
     }
     androidx.activity.compose.BackHandler(enabled = screen == Screen.Assistants) {
-        screen = Screen.Settings
+        screen = personaReturnScreen
     }
     androidx.activity.compose.BackHandler(
         enabled = screen in setOf(
@@ -126,8 +130,12 @@ fun AppRoot(vm: ChatViewModel) {
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .then(if (screen != Screen.Chat) Modifier.navigationBarsPadding() else Modifier)
     ) {
-        when (screen) {
+        androidx.compose.animation.Crossfade(targetState = screen,
+            animationSpec = androidx.compose.animation.core.tween(160), label = "page") { currentScreen ->
+        screenState.SaveableStateProvider(currentScreen.name) {
+        when (currentScreen) {
             Screen.Chat -> {
                 ModalNavigationDrawer(
                     drawerState = drawerState,
@@ -156,7 +164,8 @@ fun AppRoot(vm: ChatViewModel) {
                         conversation = activeConv,
                         settings = settings,
                         activeProvider = activeProvider,
-                        assistantName = conversationAssistant?.name ?: "女仆",
+                        assistantName = conversationAssistant?.displayName ?: "女仆",
+                        assistantAvatar = conversationAssistant?.avatarPath,
                         isStreaming = isStreaming,
                         streamingOverlay = streamingOverlay,
                         ttsState = ttsState,
@@ -165,7 +174,7 @@ fun AppRoot(vm: ChatViewModel) {
                             settings.activeModel
                         ),
                         onMenu = { scope.launch { drawerState.open() } },
-                        onSend = { text -> vm.sendMessage(text) },
+                        onSend = { text, photos -> vm.sendMessage(text, photos) },
                         onStop = { vm.stopStreaming() },
                         onRegenerate = { vm.regenerate() },
                         onRegenerateFrom = { msgId -> vm.regenerateFrom(msgId) },
@@ -177,8 +186,14 @@ fun AppRoot(vm: ChatViewModel) {
                         onReasoningEffortChange = { vm.setReasoningEffort(it) },
                         onSaveImage = { path, uri -> vm.saveImageAttachment(path, uri) },
                         onOpenErrors = { screen = Screen.ErrorCenter },
+                        onPhotoError = vm::reportPhotoFailure,
                         onNew = { vm.newConversation() },
                         onOpenSettings = { screen = Screen.Settings },
+                        onEditPersona = {
+                            personaReturnScreen = Screen.Chat
+                            personaToEdit = conversationAssistant?.id
+                            screen = Screen.Assistants
+                        },
                         onPickModel = {
                             if (providers.isEmpty()) {
                                 editingProvider = null
@@ -200,7 +215,11 @@ fun AppRoot(vm: ChatViewModel) {
                         providersReturnScreen = Screen.Settings
                         screen = Screen.Providers
                     },
-                    onOpenAssistants = { screen = Screen.Assistants },
+                    onOpenAssistants = {
+                        personaReturnScreen = Screen.Settings
+                        personaToEdit = null
+                        screen = Screen.Assistants
+                    },
                     onOpenMemories = { screen = Screen.Memories },
                     onOpenTts = { screen = Screen.TtsSettings },
                     onOpenSearch = { screen = Screen.SearchSettings },
@@ -215,10 +234,12 @@ fun AppRoot(vm: ChatViewModel) {
             Screen.Assistants -> {
                 AssistantsScreen(
                     assistants = assistants,
+                    editOnOpenId = personaToEdit,
                     activeId = settings.activeAssistantId,
-                    onBack = { screen = Screen.Settings },
+                    onBack = { screen = personaReturnScreen },
                     onSelect = { vm.selectAssistant(it) },
                     onUpsert = { vm.upsertAssistant(it) },
+                    onPhotoError = vm::reportPhotoFailure,
                     onDelete = { vm.deleteAssistant(it) }
                 )
             }
@@ -359,7 +380,9 @@ fun AppRoot(vm: ChatViewModel) {
             }
         }
 
-        SnackbarHost(hostState = snackbar, modifier = Modifier.fillMaxSize())
+        }
+        }
+        SnackbarHost(hostState = snackbar, modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter))
     }
 
     if (showModelPicker) {

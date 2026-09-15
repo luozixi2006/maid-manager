@@ -77,6 +77,8 @@ fun ProviderEditorScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(18.dp))
+            ProviderHelp(baseUrl)
+            Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },

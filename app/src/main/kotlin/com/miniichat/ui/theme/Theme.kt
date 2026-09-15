@@ -5,6 +5,12 @@ import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Shapes
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -23,21 +29,24 @@ import androidx.core.view.WindowCompat
 
 /**
  * Clean iOS-style flat theme.
- * Pure white / near-black backgrounds, hairline dividers, accent purple for primary.
+ * Grouped neutral surfaces, hairline dividers and one restrained blue accent.
  */
-private val LightColors = lightColorScheme(
-    primary = Color(0xFF6E5CFF),
+internal val LightColors = lightColorScheme(
+    primary = Color(0xFF0066CC),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFEDE9FF),
-    onPrimaryContainer = Color(0xFF170B5C),
-    secondary = Color(0xFF6E5CFF),
+    primaryContainer = Color(0xFFE8F2FF),
+    onPrimaryContainer = Color(0xFF00366F),
+    secondary = Color(0xFF0066CC),
     onSecondary = Color.White,
-    background = Color(0xFFFFFFFF),
+    background = Color(0xFFF2F2F7),
     onBackground = Color(0xFF111114),
     surface = Color(0xFFFFFFFF),
     onSurface = Color(0xFF111114),
     surfaceVariant = Color(0xFFF3F2F7),
-    onSurfaceVariant = Color(0xFF6F6E78),
+    onSurfaceVariant = Color(0xFF62626B),
+    surfaceContainer = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFFFFFFF),
+    surfaceContainerHigh = Color(0xFFE9E9EF),
     outline = Color(0xFFE3E1EA),
     outlineVariant = Color(0xFFEEEDF2),
     error = Color(0xFFE34864),
@@ -46,16 +55,19 @@ private val LightColors = lightColorScheme(
 
 // Tightened dark scheme: lighter onSurfaceVariant for legibility, slightly bolder
 // surface contrast so subtle UI (chips, dividers, hint text) reads cleanly.
-private val DarkColors = darkColorScheme(
-    primary = Color(0xFFB1A4FF),
-    onPrimary = Color(0xFF15093D),
-    primaryContainer = Color(0xFF3826A8),
-    onPrimaryContainer = Color(0xFFEDE7FF),
-    secondary = Color(0xFFB1A4FF),
-    onSecondary = Color(0xFF15093D),
+internal val DarkColors = darkColorScheme(
+    primary = Color(0xFF83BDFF),
+    onPrimary = Color(0xFF002B55),
+    primaryContainer = Color(0xFF153657),
+    onPrimaryContainer = Color(0xFFD6EAFF),
+    secondary = Color(0xFF83BDFF),
+    onSecondary = Color(0xFF002B55),
     background = Color(0xFF000000),
     onBackground = Color(0xFFF2F1F7),
-    surface = Color(0xFF101013),
+    surface = Color(0xFF1C1C1E),
+    surfaceContainer = Color(0xFF1C1C1E),
+    surfaceContainerLow = Color(0xFF1C1C1E),
+    surfaceContainerHigh = Color(0xFF2C2C2E),
     onSurface = Color(0xFFF2F1F7),
     surfaceVariant = Color(0xFF24242C),
     onSurfaceVariant = Color(0xFFC4C2D0),
@@ -118,7 +130,10 @@ fun MaidManagerTheme(
                 dyn.copy(
                     background = Color(0xFF000000),
                     onBackground = Color(0xFFF2F1F7),
-                    surface = Color(0xFF101013),
+                    surface = Color(0xFF1C1C1E),
+                    surfaceContainer = Color(0xFF1C1C1E),
+                    surfaceContainerLow = Color(0xFF1C1C1E),
+                    surfaceContainerHigh = Color(0xFF2C2C2E),
                     onSurface = Color(0xFFF2F1F7),
                     surfaceVariant = Color(0xFF24242C),
                     onSurfaceVariant = Color(0xFFC4C2D0),
@@ -143,6 +158,14 @@ fun MaidManagerTheme(
     MaterialTheme(
         colorScheme = colors,
         typography = AppTypography,
-        content = content
-    )
+        shapes = Shapes(
+            extraSmall = RoundedCornerShape(8.dp), small = RoundedCornerShape(12.dp),
+            medium = RoundedCornerShape(16.dp), large = RoundedCornerShape(20.dp),
+            extraLarge = RoundedCornerShape(24.dp)
+        )
+    ) {
+        // MaterialTheme alone does not provide LocalContentColor. A root Surface does.
+        Surface(modifier = Modifier.fillMaxSize(), color = colors.background,
+            contentColor = colors.onBackground, content = content)
+    }
 }

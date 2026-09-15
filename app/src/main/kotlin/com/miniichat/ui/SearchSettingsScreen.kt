@@ -157,6 +157,7 @@ private fun SearchSourceEditor(
                 )
             }
 
+            if (source.enabled) {
             when (source.type) {
                 SearchSourceType.BRAVE,
                 SearchSourceType.TAVILY -> ApiKeyField(source, onChange)
@@ -194,6 +195,20 @@ private fun SearchSourceEditor(
                 }
             }
 
+            when (source.type) {
+                SearchSourceType.BRAVE -> {
+                    OfficialLink("Brave · 注册与 API 密钥", "https://brave.com/search/api/")
+                    OfficialLink("Brave · 接口文档", "https://api-dashboard.search.brave.com/app/documentation/web-search/get-started")
+                }
+                SearchSourceType.TAVILY -> {
+                    OfficialLink("Tavily · 获取 API 密钥", "https://app.tavily.com/")
+                    OfficialLink("Tavily · 使用文档", "https://docs.tavily.com/")
+                }
+                SearchSourceType.SEARXNG -> OfficialLink("SearXNG · 部署与 JSON 搜索说明", "https://docs.searxng.org/")
+                SearchSourceType.CUSTOM -> OfficialLink("自定义搜索 · 本项目接口说明", "https://github.com/luozixi2006/maid-manager/blob/main/docs/SEARCH_API.md")
+            }
+
+            }
             if (source.enabled) {
                 source.configurationProblem()?.let { problem ->
                     Text(

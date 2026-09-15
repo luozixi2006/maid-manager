@@ -19,8 +19,11 @@ data class Assistant(
     val lastProactiveMessageAt: Long = 0L,
     val nextProactiveCheckAt: Long = 0L,
     val proactiveMessageSummaries: List<String> = emptyList(),
-    val proactiveFailureCount: Int = 0
-)
+    val proactiveFailureCount: Int = 0,
+    val conversationName: String = ""
+) {
+    val displayName: String get() = conversationName.trim().ifBlank { name }
+}
 
 object AssistantPresets {
     fun defaults(): List<Assistant> = listOf(

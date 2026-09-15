@@ -23,6 +23,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -63,10 +72,16 @@ fun InputBar(
     onWebEnabledChange: (Boolean) -> Unit,
     onReasoningEnabledChange: (Boolean) -> Unit,
     onReasoningEffortChange: (String) -> Unit,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    photos: List<String> = emptyList(),
+    photoBusy: Boolean = false,
+    onChoosePhoto: () -> Unit = {},
+    onTakePhoto: () -> Unit = {},
+    onRemovePhoto: (String) -> Unit = {}
 ) {
     val focus = LocalFocusManager.current
     var effortMenuOpen by remember { mutableStateOf(false) }
+    var attachmentMenuOpen by remember { mutableStateOf(false) }
     val enabledLabel = stringResource(R.string.switch_on)
     val disabledLabel = stringResource(R.string.switch_off)
     val webLabel = stringResource(
@@ -83,7 +98,25 @@ fun InputBar(
         modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
             .padding(WindowInsets.navigationBars.asPaddingValues())
     ) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+        if (photos.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                photos.forEach { path ->
+                    Box(Modifier.size(84.dp).clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)) {
+                        localPhoto(path)?.let { Image(it, "待发送照片", Modifier.matchParentSize(), contentScale = ContentScale.Crop) }
+                        IconButton(onClick = { onRemovePhoto(path) }, Modifier.align(Alignment.TopEnd).size(36.dp)) {
+                            Icon(Icons.Default.Close, "移除照片", Modifier.background(MaterialTheme.colorScheme.surface, CircleShape)
+                                .padding(3.dp), tint = MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                }
+            }
+            Text("照片将发送给当前模型服务，请选择支持看图的模型。", Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (photoBusy) Text("正在处理照片…", Modifier.padding(horizontal = 16.dp),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                 .padding(start = 12.dp, end = 12.dp, top = 6.dp),
@@ -146,6 +179,17 @@ fun InputBar(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Bottom
         ) {
+            Box {
+                IconButton(onClick = { attachmentMenuOpen = true }, enabled = !photoBusy && photos.size < 4 && !isStreaming) {
+                    Icon(Icons.Default.Add, "添加照片", tint = MaterialTheme.colorScheme.primary)
+                }
+                DropdownMenu(expanded = attachmentMenuOpen, onDismissRequest = { attachmentMenuOpen = false }) {
+                    DropdownMenuItem(text = { Text("照片图库") }, leadingIcon = { Icon(Icons.Outlined.PhotoLibrary, null) },
+                        onClick = { attachmentMenuOpen = false; onChoosePhoto() })
+                    DropdownMenuItem(text = { Text("拍照") }, leadingIcon = { Icon(Icons.Outlined.PhotoCamera, null) },
+                        onClick = { attachmentMenuOpen = false; onTakePhoto() })
+                }
+            }
             Box(
                 modifier = Modifier.weight(1f).heightIn(min = 40.dp, max = 160.dp)
                     .clip(RoundedCornerShape(20.dp))
@@ -165,7 +209,7 @@ fun InputBar(
                     onValueChange = onValueChange,
                     modifier = Modifier.fillMaxWidth(),
                     textStyle = LocalTextStyle.current.copy(
-                        color = LocalContentColor.current,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 16.sp,
                         lineHeight = 22.sp
                     ),
@@ -176,7 +220,7 @@ fun InputBar(
                 )
             }
             Spacer(Modifier.width(8.dp))
-            val canSend = value.trim().isNotEmpty() && !isStreaming && enabled
+            val canSend = (value.isNotBlank() || photos.isNotEmpty()) && !photoBusy && !isStreaming && enabled
             val background = when {
                 isStreaming -> MaterialTheme.colorScheme.onSurface
                 canSend -> MaterialTheme.colorScheme.primary

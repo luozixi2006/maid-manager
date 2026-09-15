@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -48,13 +51,16 @@ import com.miniichat.util.newId
 fun AssistantsScreen(
     assistants: List<Assistant>,
     activeId: String,
+    editOnOpenId: String? = null,
     onBack: () -> Unit,
     onSelect: (String) -> Unit,
     onUpsert: (Assistant) -> Unit,
+    onPhotoError: (String) -> Unit,
     onDelete: (String) -> Unit
 ) {
-    var editing by remember { mutableStateOf<Assistant?>(null) }
-    var creating by remember { mutableStateOf(false) }
+    var editingId by rememberSaveable(editOnOpenId) { mutableStateOf(editOnOpenId) }
+    val editing = assistants.firstOrNull { it.id == editingId }
+    var creating by rememberSaveable { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<Assistant?>(null) }
 
     Column(
@@ -99,8 +105,14 @@ fun AssistantsScreen(
                             selected = assistant.id == activeId,
                             onClick = { onSelect(assistant.id) }
                         )
+                        PersonAvatar(assistant.displayName, assistant.avatarPath, 36.dp,
+                            Modifier.padding(end = 8.dp))
                         Column(Modifier.weight(1f)) {
                             Text(assistant.name, style = MaterialTheme.typography.titleSmall)
+                            if (assistant.conversationName.isNotBlank()) {
+                                Text("对话中显示为 ${assistant.displayName}", style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary)
+                            }
                             Text(
                                 assistant.systemPrompt,
                                 style = MaterialTheme.typography.bodySmall,
@@ -109,7 +121,7 @@ fun AssistantsScreen(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        IconButton(onClick = { editing = assistant }) {
+                        IconButton(onClick = { editingId = assistant.id }) {
                             Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.edit))
                         }
                         IconButton(
@@ -127,15 +139,16 @@ fun AssistantsScreen(
     if (creating || editing != null) {
         PersonaEditorDialog(
             initial = editing,
+            onPhotoError = onPhotoError,
             onDismiss = {
                 creating = false
-                editing = null
+                editingId = null
             },
             onSave = {
                 onUpsert(it)
                 onSelect(it.id)
                 creating = false
-                editing = null
+                editingId = null
             }
         )
     }
@@ -161,24 +174,53 @@ fun AssistantsScreen(
 @Composable
 private fun PersonaEditorDialog(
     initial: Assistant?,
+    onPhotoError: (String) -> Unit,
     onDismiss: () -> Unit,
     onSave: (Assistant) -> Unit
 ) {
-    var name by remember(initial?.id) { mutableStateOf(initial?.name ?: "") }
-    var prompt by remember(initial?.id) { mutableStateOf(initial?.systemPrompt ?: "") }
-    var proactiveEnabled by remember(initial?.id) { mutableStateOf(initial?.proactiveEnabled ?: true) }
+    var name by rememberSaveable(initial?.id) { mutableStateOf(initial?.name ?: "") }
+    var displayName by rememberSaveable(initial?.id) { mutableStateOf(initial?.conversationName ?: "") }
+    var avatarPath by rememberSaveable(initial?.id) { mutableStateOf(initial?.avatarPath) }
+    val photos = rememberPhotoActions(initial?.id ?: "new-persona", 1,
+        onImported = { it.firstOrNull()?.let { path -> avatarPath = path } },
+        onError = onPhotoError)
+    var prompt by rememberSaveable(initial?.id) { mutableStateOf(initial?.systemPrompt ?: "") }
+    var proactiveEnabled by rememberSaveable(initial?.id) { mutableStateOf(initial?.proactiveEnabled ?: true) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(stringResource(if (initial == null) R.string.add_persona else R.string.edit_persona))
         },
         text = {
-            Column {
+            Column(Modifier.heightIn(max = 540.dp).verticalScroll(rememberScrollState())) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    PersonAvatar(displayName.ifBlank { name }, avatarPath, 64.dp)
+                    Column(Modifier.padding(start = 12.dp)) {
+                        TextButton(onClick = photos.choose, enabled = !photos.busy) { Text("选择头像") }
+                        Row {
+                            TextButton(onClick = photos.take, enabled = !photos.busy) { Text("拍照") }
+                            if (avatarPath != null) TextButton(onClick = { avatarPath = null }) { Text("移除") }
+                        }
+                    }
+                }
+                if (photos.busy) Text("正在处理照片…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.assistant_name)) },
+                    label = { Text("人设备注") },
+                    supportingText = { Text("用来说明这个人设的用途") },
+                    singleLine = true
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = displayName,
+                    onValueChange = { displayName = it.take(60) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("对话名字（可选）") },
+                    placeholder = { Text(name.ifBlank { "留空则使用人设名称" }) },
+                    supportingText = { Text("聊天和通知使用此名字；留空时跟随人设备注") },
                     singleLine = true
                 )
                 Spacer(Modifier.height(12.dp))
@@ -211,16 +253,14 @@ private fun PersonaEditorDialog(
                 onClick = {
                     val value = (initial ?: Assistant(id = newId(), name = name.trim())).copy(
                         name = name.trim(),
-                        avatar = "女",
+                        conversationName = displayName.trim(),
+                        avatarPath = avatarPath,
                         systemPrompt = prompt.trim(),
-                        preferredProviderId = null,
-                        preferredModel = null,
-                        temperature = null,
                         proactiveEnabled = proactiveEnabled
                     )
                     onSave(value)
                 },
-                enabled = name.isNotBlank() && prompt.isNotBlank()
+                enabled = name.isNotBlank() && prompt.isNotBlank() && !photos.busy
             ) { Text(stringResource(R.string.save)) }
         },
         dismissButton = {

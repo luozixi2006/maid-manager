@@ -563,16 +563,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         ttsManager.stop()
     }
 
+    fun reportPhotoFailure(reason: String) {
+        viewModelScope.launch {
+            presentThrowable(com.miniichat.data.ImageInputException(reason),
+                AppErrorContext(ErrorArea.STORAGE, ErrorOperation.READ_LOCAL_DATA))
+        }
+    }
+
     fun sendMessage(
         text: String,
         attachments: List<Attachment> = emptyList(),
         webOverride: Boolean? = null,
         reasoningOverride: Boolean? = null
-    ) {
-        if (_isStreaming.value || streamingJob?.isActive == true) return
+    ): Boolean {
+        if (_isStreaming.value || streamingJob?.isActive == true) return false
         _error.value = null
         val trimmed = text.trim()
-        if (trimmed.isEmpty() && attachments.isEmpty()) return
+        if (trimmed.isEmpty() && attachments.isEmpty()) return false
 
         val current = settings.value
         val linkedPersonaId = _activeId.value
@@ -595,7 +602,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 AppErrorContext(ErrorArea.MODEL, ErrorOperation.SEND_MESSAGE),
                 message = "请先添加模型服务并选择模型。"
             )
-            return
+            return false
         }
 
         val skippedRoutes = requestedRoutes.filterNot(::isUsableRoute)
@@ -615,7 +622,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 message = if (missingKey) "请填写 ${first.provider.name} 的 API 密钥。"
                 else "${first.provider.name} 的 Base URL 无法使用。"
             )
-            return
+            return false
         }
         if (skippedRoutes.isNotEmpty()) {
             skippedRoutes.forEach { skipped ->
@@ -639,7 +646,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val requestJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
           try {
             val activeId = _activeId.value ?: newId().also { _activeId.value = it }
-            val title = trimmed.take(30).replace("\n", " ")
+            val title = trimmed.take(30).replace("\n", " ").ifBlank { "照片对话" }
             val personaId = assistant?.id ?: current.activeAssistantId
             val userMessage = Message(
                 id = newId(),
@@ -736,6 +743,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     }
 
+                    val imageStore = com.miniichat.data.LocalImageStore(getApplication())
+                    var imageRequestSize = 0L
                     val historyMessages = updated.messages
                         .filterNot {
                             it.id == answerId ||
@@ -743,7 +752,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                     it.deliveryStatus != MessageDeliveryStatus.SUCCEEDED) ||
                                 (it.role == "assistant" && it.content.isBlank())
                         }
-                        .map { message -> ChatMessage(message.role, message.content) }
+                        .map { message ->
+                            val photos = if (message.role == "user") imageStore.dataUrls(message.attachments)
+                                else emptyList()
+                            imageRequestSize += photos.sumOf { it.length.toLong() }
+                            if (imageRequestSize > 16L * 1024 * 1024) {
+                                throw com.miniichat.data.ImageInputException("这段对话的照片较多，请新建对话后继续发送。")
+                            }
+                            ChatMessage(message.role, message.content, photos)
+                        }
 
                     val (successfulRoute, attempts) = chatGateway.stream(
                         routes = routes,
@@ -756,12 +773,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                     template = systemTemplate,
                                     model = route.modelId,
                                     provider = route.provider.name,
-                                    assistant = assistant?.name ?: "女仆"
+                                    assistant = assistant?.displayName ?: "女仆"
                                 )
                                 if (renderedSystem.isNotBlank()) {
                                     add(ChatMessage("system", renderedSystem))
                                 }
                                 addAll(supportingMessages)
+                                assistant?.conversationName?.trim()?.takeIf { it.isNotBlank() }?.let { name ->
+                                    add(ChatMessage("system", "用户为你设置的对话名字是「$name」，在当前对话中使用这个名字。"))
+                                }
                                 if (reasoningEnabled &&
                                     !client.supportsNativeReasoning(route.provider, route.modelId)
                                 ) {
@@ -939,6 +959,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
         streamingJob = requestJob
         requestJob.start()
+        return true
     }
 
     private fun formatMemories(memories: List<LongTermMemory>): String = buildString {

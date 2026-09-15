@@ -90,7 +90,7 @@ fun GeneratedImageContent(
         }
     }
     val saveLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("image/png")
+        ActivityResultContracts.CreateDocument(if (localPath.endsWith(".jpg", true)) "image/jpeg" else "image/png")
     ) { uri -> if (uri != null) onSave(localPath, uri) }
 
     Column(modifier = modifier.fillMaxWidth()) {
@@ -121,7 +121,8 @@ fun GeneratedImageContent(
                     Text(stringResource(R.string.view_large_image), modifier = Modifier.padding(start = 4.dp))
                 }
                 TextButton(onClick = {
-                    saveLauncher.launch("maid-image-${System.currentTimeMillis()}.png")
+                    val extension = if (localPath.endsWith(".jpg", true)) "jpg" else "png"
+                    saveLauncher.launch("photo-${System.currentTimeMillis()}.$extension")
                 }) {
                     Icon(Icons.Default.SaveAlt, contentDescription = null)
                     Text(stringResource(R.string.save_image), modifier = Modifier.padding(start = 4.dp))

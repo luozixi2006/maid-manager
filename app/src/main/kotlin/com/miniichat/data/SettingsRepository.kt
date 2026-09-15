@@ -23,7 +23,7 @@ data class AppSettings(
     val temperature: Float = 0.7f,
     val stream: Boolean = true,
     val language: String = "system",          // system | en | zh
-    val dynamicColor: Boolean = true,
+    val dynamicColor: Boolean = false,
     val themeMode: String = "system",         // system | light | dark
     val ttsProvider: String = "Custom HTTP TTS",
     val ttsBaseUrl: String = "",
@@ -92,7 +92,7 @@ class SettingsRepository(private val context: Context) {
         temperature = p[Keys.TEMP] ?: 0.7f,
         stream = p[Keys.STREAM] ?: true,
         language = p[Keys.LANG] ?: "system",
-        dynamicColor = p[Keys.DYNAMIC] ?: true,
+        dynamicColor = p[Keys.DYNAMIC] ?: false,
         themeMode = p[Keys.THEME] ?: "system",
         ttsProvider = p[Keys.TTS_PROVIDER] ?: "Custom HTTP TTS",
         ttsBaseUrl = p[Keys.TTS_BASE_URL] ?: "",

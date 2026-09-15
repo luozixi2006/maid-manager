@@ -22,7 +22,26 @@ object AppErrorClassifier {
 
     fun classify(error: Throwable, context: AppErrorContext = AppErrorContext()): AppError {
         val causes = causeSequence(error)
+        causes.filterIsInstance<com.miniichat.data.ImageInputException>().firstOrNull()?.let { image ->
+            return describe(AppErrorType.LOCAL_STORAGE_FAILED, context, null,
+                listOf(image::class.java.name)).copy(
+                title = "照片暂时无法使用", userMessage = image.userReason,
+                explanation = "照片没有成功读取或超过大小限制，尚未发送给模型。",
+                suggestions = listOf("重新选择照片，或新建对话后重试")
+            )
+        }
         val http = causes.filterIsInstance<LlmHttpException>().firstOrNull()
+        if (http?.statusCode in setOf(400, 415, 422) && http != null &&
+            listOf("image_url", "image input", "vision", "multimodal", "image content").any {
+                http.responseBody.contains(it, ignoreCase = true)
+            }) {
+            return describe(AppErrorType.REQUEST_REJECTED, context, http.statusCode,
+                listOf(http::class.java.name)).copy(
+                title = "模型未接受照片", userMessage = "当前服务拒绝了图片请求。",
+                explanation = "该模型可能不支持图片，或照片数量、大小超出模型限制。原始服务响应不会写入错误报告。",
+                suggestions = listOf("在模型目录选择支持图片输入的视觉模型", "减少照片数量后重试")
+            )
+        }
         val update = causes.filterIsInstance<UpdateException>().firstOrNull()
         val type = when {
             error is CancellationException -> AppErrorType.CANCELLED

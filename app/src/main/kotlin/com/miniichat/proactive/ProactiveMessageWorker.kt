@@ -139,10 +139,10 @@ class ProactiveMessageWorker(
         try {
             val memories = memoryRepository.enabled(30).joinToString("\n") { "- ${it.content}" }
             val recent = conversation.messages.takeLast(28).joinToString("\n") {
-                "${if (it.role == "user") "User" else assistant.name}: ${it.content.take(900)}"
+                "${if (it.role == "user") "User" else assistant.displayName}: ${it.content.take(900)}"
             }.takeLast(14_000)
             val prompt = """
-                You decide whether ${assistant.name} has a meaningful reason to contact User now.
+                You decide whether ${assistant.displayName} has a meaningful reason to contact User now.
                 Return one JSON object only:
                 {"action":"SEND|SKIP","message":"","topic_summary":"","reason":"","next_contact_tendency":0.0}
 
@@ -194,7 +194,7 @@ class ProactiveMessageWorker(
                 settingsRepository.update { it.copy(lastProactiveMessageAt = now) }
                 ProactiveNotifications.publish(
                     applicationContext,
-                    assistant.name,
+                    assistant.displayName,
                     message.content,
                     assistant.avatarPath,
                     ProactiveDestination("normal", conversationId = saved.id)

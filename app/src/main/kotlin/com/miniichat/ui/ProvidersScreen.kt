@@ -87,6 +87,7 @@ fun ProvidersScreen(
                 }
             }
             Spacer(Modifier.height(8.dp))
+            active?.let { ProviderHelp(it.baseUrl) }
 
             if (providers.isEmpty()) {
                 Text("还没有模型服务", color = MaterialTheme.colorScheme.onSurfaceVariant)

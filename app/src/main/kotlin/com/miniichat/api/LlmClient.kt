@@ -36,7 +36,8 @@ import java.util.Locale
 
 data class ChatMessage(
     val role: String,
-    val content: String
+    val content: String,
+    val imageDataUrls: List<String> = emptyList()
 )
 
 @Serializable
@@ -133,7 +134,7 @@ class LlmClient {
             for (m in messages) {
                 add(kotlinx.serialization.json.buildJsonObject {
                     put("role", m.role)
-                    put("content", m.content)
+                    put("content", messageContent(m))
                 })
             }
         }

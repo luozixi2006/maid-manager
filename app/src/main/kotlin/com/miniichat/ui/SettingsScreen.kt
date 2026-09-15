@@ -22,6 +22,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -168,12 +171,15 @@ private fun SettingsSection(
 ) {
     Text(
         text = title,
-        modifier = Modifier.padding(start = 2.dp, top = 12.dp, bottom = 5.dp),
-        style = MaterialTheme.typography.labelLarge,
+        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp),
+        style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontWeight = FontWeight.SemiBold
     )
-    Column(content = { content() })
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface) {
+        Column(content = { content() })
+    }
     if (!isLast) Spacer(Modifier.height(12.dp))
 }
 
@@ -187,7 +193,7 @@ private fun SettingsEntry(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 2.dp, vertical = 13.dp),
+            .padding(horizontal = 16.dp, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f).padding(end = 12.dp)) {
@@ -208,7 +214,7 @@ private fun SettingsEntry(
             tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+    HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
 }
 
 @Composable
@@ -218,9 +224,11 @@ fun SettingsTopBar(title: String, onBack: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back),
+                tint = MaterialTheme.colorScheme.primary)
         }
-        Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+        Text(title, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f))
     }
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
 }

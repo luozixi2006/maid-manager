@@ -39,7 +39,7 @@ import androidx.compose.ui.unit.sp
 fun MarkdownText(
     text: String,
     modifier: Modifier = Modifier,
-    color: Color = LocalContentColor.current
+    color: Color = MaterialTheme.colorScheme.onSurface
 ) {
     val blocks = remember(text) { parseBlocks(text) }
     Column(modifier = modifier) {
@@ -52,21 +52,21 @@ fun MarkdownText(
                         2 -> MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp)
                         else -> MaterialTheme.typography.titleMedium
                     }
-                    Text(parseInline(block.text), color = color, style = style)
+                    Text(parseInline(block.text, MaterialTheme.colorScheme.primary), color = color, style = style)
                 }
                 is Block.Paragraph -> {
-                    Text(parseInline(block.text), color = color, style = MaterialTheme.typography.bodyLarge)
+                    Text(parseInline(block.text, MaterialTheme.colorScheme.primary), color = color, style = MaterialTheme.typography.bodyLarge)
                 }
                 is Block.BulletItem -> {
                     Row(modifier = Modifier.fillMaxWidth()) {
                         Text("•  ", color = color, style = MaterialTheme.typography.bodyLarge)
-                        Text(parseInline(block.text), color = color, style = MaterialTheme.typography.bodyLarge)
+                        Text(parseInline(block.text, MaterialTheme.colorScheme.primary), color = color, style = MaterialTheme.typography.bodyLarge)
                     }
                 }
                 is Block.NumberedItem -> {
                     Row(modifier = Modifier.fillMaxWidth()) {
                         Text("${block.index}. ", color = color, style = MaterialTheme.typography.bodyLarge)
-                        Text(parseInline(block.text), color = color, style = MaterialTheme.typography.bodyLarge)
+                        Text(parseInline(block.text, MaterialTheme.colorScheme.primary), color = color, style = MaterialTheme.typography.bodyLarge)
                     }
                 }
                 is Block.Quote -> {
@@ -79,7 +79,7 @@ fun MarkdownText(
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            parseInline(block.text),
+                            parseInline(block.text, MaterialTheme.colorScheme.primary),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyLarge.copy(fontStyle = FontStyle.Italic)
                         )
@@ -212,7 +212,7 @@ private fun parseBlocks(text: String): List<Block> {
     return result
 }
 
-private fun parseInline(text: String): AnnotatedString = buildAnnotatedString {
+private fun parseInline(text: String, linkColor: Color): AnnotatedString = buildAnnotatedString {
     var i = 0
     while (i < text.length) {
         val rest = text.substring(i)
@@ -228,7 +228,7 @@ private fun parseInline(text: String): AnnotatedString = buildAnnotatedString {
             val end = text.indexOf("**", i + 2)
             if (end > i + 2) {
                 pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
-                append(parseInline(text.substring(i + 2, end))); pop()
+                append(parseInline(text.substring(i + 2, end), linkColor)); pop()
                 i = end + 2; continue
             }
         }
@@ -236,7 +236,7 @@ private fun parseInline(text: String): AnnotatedString = buildAnnotatedString {
             val end = text.indexOf("~~", i + 2)
             if (end > i + 2) {
                 pushStyle(SpanStyle(textDecoration = TextDecoration.LineThrough))
-                append(parseInline(text.substring(i + 2, end))); pop()
+                append(parseInline(text.substring(i + 2, end), linkColor)); pop()
                 i = end + 2; continue
             }
         }
@@ -255,7 +255,7 @@ private fun parseInline(text: String): AnnotatedString = buildAnnotatedString {
                 val urlEnd = text.indexOf(')', close + 2)
                 if (urlEnd > close + 1) {
                     val label = text.substring(i + 1, close)
-                    pushStyle(SpanStyle(color = Color(0xFF7C5CFF), textDecoration = TextDecoration.Underline))
+                    pushStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline))
                     append(label); pop()
                     i = urlEnd + 1; continue
                 }
