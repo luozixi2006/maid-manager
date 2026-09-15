@@ -27,9 +27,10 @@ object TaskActions {
     fun automatic(context: Context, task: PhoneTask, tool: String): Boolean =
         preferences(context).getBoolean("approve:${task.scope}:$tool", false)
     suspend fun create(context: Context, goal: String, scope: String = "", suggestion: Boolean = false,
-                       ruleId: String = ""): PhoneTask {
+                       ruleId: String = "", rootDirectory: String = "Download"): PhoneTask {
         require(goal.isNotBlank() && goal.length <= 4000) { "请简要描述要完成的事情（最多 4000 字）" }
         ToolPolicy.relative(scope, true)
+        ToolPolicy.relative(rootDirectory)
         val settings = SettingsRepository(context).settings.first()
         val provider = ProviderStore(context).snapshot().firstOrNull { it.id == settings.activeProviderId }
             ?: error("请先在服务设置中选择模型")
@@ -37,11 +38,13 @@ object TaskActions {
         check(provider.authMode == ProviderAuthMode.NONE || provider.apiKey.isNotBlank()) { "请先配置当前服务的 API 密钥" }
         val assistant = AssistantStore(context).snapshot().firstOrNull { it.id == settings.activeAssistantId }
         val task = PhoneTask(goal = goal.trim(), scope = scope.trim(), providerId = provider.id,
+            engineVersion = 2, rootDirectory = rootDirectory,
+            allowedPackages = preferences(context).getStringSet("agent_apps", emptySet()).orEmpty().toList(),
             providerEndpoint = provider.baseUrl, model = settings.activeModel,
             characterName = assistant?.displayName ?: "女仆", avatarPath = assistant?.avatarPath.orEmpty(),
             approvedSuggestion = !suggestion, sourceRule = ruleId,
             state = if (suggestion) TaskState.APPROVAL else TaskState.QUEUED,
-            detail = if (suggestion) "要帮你处理这件事吗？确认后才扫描文件并交给当前服务规划。" else "等待检查权限")
+            detail = if (suggestion) "要帮你处理这件事吗？确认后根据目标按需读取授权范围的数据。" else "正在准备规划；按需检查权限")
         TaskStore.of(context).put(task)
         if (!suggestion) enqueue(context, task.id) else TaskNotices.publish(context, task)
         return task
@@ -53,7 +56,13 @@ object TaskActions {
     }
     fun recover(context: Context) {
         TaskStore.of(context).all().filter { active(it.state) || it.state == TaskState.PERMISSION }.forEach {
-            if (it.state == TaskState.PERMISSION && DownloadsTools(context, it.scope).permitted())
+            val permissionReady = if (it.engineVersion >= 2) when (it.neededPermission) {
+                "files" -> DownloadsTools(context, "").permitted()
+                "accessibility" -> com.miniichat.tasks.agent.PhoneAccessibility.current != null
+                "notifications" -> com.miniichat.tasks.agent.NotificationAccess.listener != null
+                else -> false
+            } else DownloadsTools(context, it.scope).permitted()
+            if (it.state == TaskState.PERMISSION && permissionReady)
                 TaskStore.of(context).change(it.id) { task -> task.copy(state = TaskState.QUEUED, detail = "权限已取得，继续原任务") }
             if (TaskStore.of(context).get(it.id)?.state != TaskState.PERMISSION) enqueue(context, it.id)
         }
@@ -66,6 +75,10 @@ object TaskActions {
         val store = TaskStore.of(context)
         synchronized(store) {
             val task = store.get(id) ?: return
+            if (task.engineVersion >= 2 && action !in setOf("pause", "cancel")) {
+                com.miniichat.tasks.agent.AgentActions.respond(context, task, action, answer, token)
+                return
+            }
             if (action in setOf("approve", "always", "answer", "skip") && token != task.approvalToken) return
             when (action) {
                 "pause", "cancel" -> {
@@ -117,7 +130,7 @@ object TaskActions {
             }
         }
     }
-    private fun resumeAfterCurrent(context: Context, id: String) {
+    fun resumeAfterCurrent(context: Context, id: String) {
         // APPEND_OR_REPLACE avoids losing a fast button click while the waiting worker is returning.
         WorkManager.getInstance(context).enqueueUniqueWork("phone-task-$id", ExistingWorkPolicy.APPEND_OR_REPLACE,
             OneTimeWorkRequestBuilder<PhoneTaskWorker>().setInputData(workDataOf("task" to id))
@@ -135,6 +148,10 @@ class PhoneTaskWorker(context: Context, params: WorkerParameters) : CoroutineWor
             val notice = TaskNotices.notification(applicationContext, initial, ongoing = true)
             setForeground(if (Build.VERSION.SDK_INT >= 29) ForegroundInfo(4101, notice, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
                 else ForegroundInfo(4101, notice))
+            if (initial.engineVersion >= 2) {
+                com.miniichat.tasks.agent.AgentEngine(applicationContext).run(id) { isStopped }
+                return@withContext Result.success()
+            }
             // File mutations of multiple tasks are serialized within this process.
             executionLock.withLock {
                 var task = store.get(id) ?: return@withLock

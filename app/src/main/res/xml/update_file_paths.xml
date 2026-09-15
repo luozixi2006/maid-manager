@@ -2,4 +2,5 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <cache-path name="verified_updates" path="updates/" />
     <cache-path name="camera" path="camera/" />
+    <cache-path name="agent_share" path="agent-share/" />
 </paths>

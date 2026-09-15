@@ -134,11 +134,13 @@ class PetOverlayService : Service() {
                     when (t.state) {
                         TaskState.APPROVAL -> {
                             button(panel, "允许一次") { respond(t, "approve") }
-                            if (t.approvedSuggestion) button(panel, "该目录内同类操作以后允许") { respond(t, "always") }
+                            if (t.approvedSuggestion && (t.engineVersion < 2 || t.steps.getOrNull(t.cursor)?.let { com.miniichat.tasks.agent.AgentPolicy.canRemember(it) } == true))
+                                button(panel, "该范围内同类操作以后允许") { respond(t, "always") }
                             button(panel, "取消任务") { respond(t, "cancel") }
                         }
-                        TaskState.QUESTION -> t.steps.getOrNull(t.cursor)?.options?.forEach { option ->
-                            button(panel, option) { TaskActions.respond(this, t.id, "answer", option, t.approvalToken) }
+                        TaskState.QUESTION -> {
+                            if (t.neededPermission == "handoff") button(panel, "打开任务页完成系统操作") { startActivity(TaskNotices.openIntent(this)) }
+                            t.steps.getOrNull(t.cursor)?.options?.forEach { option -> button(panel, option) { TaskActions.respond(this, t.id, "answer", option, t.approvalToken) } }
                         }
                         TaskState.PERMISSION -> button(panel, "去开启权限") { startActivity(TaskNotices.openIntent(this)) }
                         TaskState.FAILED, TaskState.PAUSED -> button(panel, "从原步骤继续") { respond(t, "resume") }

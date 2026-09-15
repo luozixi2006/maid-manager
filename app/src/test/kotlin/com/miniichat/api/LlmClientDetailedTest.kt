@@ -353,13 +353,13 @@ class LlmClientDetailedTest {
     }
 }
 
-private data class MockResponse(
+internal data class MockResponse(
     val status: Int,
     val body: String,
     val contentType: String = "application/json"
 )
 
-private class LocalHttpServer(
+internal class LocalHttpServer(
     private val responder: (String) -> MockResponse
 ) : Closeable {
     private val socket = ServerSocket(0, 20, InetAddress.getByName("127.0.0.1"))

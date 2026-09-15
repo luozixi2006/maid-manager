@@ -35,6 +35,7 @@ fun TasksScreen(onBack: () -> Unit) {
     var rules by remember { mutableStateOf(emptyList<TriggerRule>()) }
     var goal by rememberSaveable { mutableStateOf(draft) }
     var scopePath by rememberSaveable { mutableStateOf("") }
+    var rootDirectory by rememberSaveable { mutableStateOf("Download") }
     var consent by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
@@ -58,6 +59,15 @@ fun TasksScreen(onBack: () -> Unit) {
             if (action == Settings.ACTION_APP_NOTIFICATION_SETTINGS) putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
         }) }.onFailure { message = "请在系统应用设置中手动开启此权限" }
     }
+    fun returnToApprovedApp(task: PhoneTask) {
+        val step = task.steps.getOrNull(task.cursor) ?: return
+        if (task.engineVersion < 2 || com.miniichat.tasks.agent.AgentPolicy.specs[step.tool]?.permission != "accessibility") return
+        val pkg = step.arguments["package"].orEmpty()
+        if (!com.miniichat.tasks.agent.AgentPolicy.validPackage(pkg) || pkg !in task.allowedPackages ||
+            pkg !in TaskActions.preferences(context).getStringSet("agent_apps", emptySet()).orEmpty()) return
+        runCatching { context.packageManager.getLaunchIntentForPackage(pkg)?.let(context::startActivity) }
+            .onFailure { message = "请手动切回目标应用，再从任务通知继续" }
+    }
     val filesGranted = remember(refresh) { DownloadsTools(context, "").permitted() }
     val overlayGranted = remember(refresh) { Settings.canDrawOverlays(context) }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -73,13 +83,14 @@ fun TasksScreen(onBack: () -> Unit) {
                 when (tab) {
                     0 -> {
                         Text("说一件要办的事", style = MaterialTheme.typography.titleLarge)
-                        Text("第一版可整理下载目录内的 PDF：读文本、分类、建文件夹、移动和重命名。不删除、不覆盖；第三方界面操作尚未开放。")
+                        Text("可以读写和整理普通文件、查资料、打开应用与网址、分享文件、添加日程，并操作你授权应用的页面。根据实际结果逐步调整，不再限定PDF。")
                         OutlinedTextField(goal, { goal = it }, label = { Text("例如：把学校 PDF 按课程整理，名字改清楚") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
-                        OutlinedTextField(scopePath, { scopePath = it }, label = { Text("下载目录内的子文件夹（可留空）") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                        Row { Checkbox(consent, { consent = it }); Text("允许将此范围内 PDF 文件名及前两页摘要交给当前 AI 服务规划。只授权这次任务范围。", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodySmall) }
+                        OutlinedTextField(rootDirectory, { rootDirectory = it }, label = { Text("手机共享存储目录，如 Download、Documents、DCIM") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        OutlinedTextField(scopePath, { scopePath = it }, label = { Text("该目录内的子文件夹（可留空）") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        Row { Checkbox(consent, { consent = it }); Text("允许为完成此任务按需读取该目录，并把必要文字交给当前AI服务。页面和通知正文另行逐次确认；应用权限由你选择。", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodySmall) }
                         Button(enabled = consent && goal.isNotBlank() && !busy, onClick = {
                             busy = true; scope.launch {
-                                try { val task = withContext(Dispatchers.IO) { TaskActions.create(context, goal, scopePath.trim()) }
+                                try { val task = withContext(Dispatchers.IO) { TaskActions.create(context, goal, scopePath.trim(), rootDirectory = rootDirectory.trim()) }
                                     selected = task.id; goal = ""; consent = false
                                 } catch (e: Exception) { message = e.message?.take(200) ?: "任务创建失败" }
                                 finally { busy = false }
@@ -91,18 +102,26 @@ fun TasksScreen(onBack: () -> Unit) {
                             OutlinedCard(Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(task.goal, style = MaterialTheme.typography.titleMedium)
-                                    Text(if (task.noticeOnly) "主动消息 · 没有读取文件" else "${task.state.label} · ${task.cursor}/${task.steps.size} 步 · 下载/${task.scope}", style = MaterialTheme.typography.labelMedium)
+                                    Text(if (task.noticeOnly) "主动消息 · 没有读取文件" else "${task.state.label} · ${task.cursor}/${task.steps.size} 步 · ${task.rootDirectory}/${task.scope}", style = MaterialTheme.typography.labelMedium)
                                     Text(task.detail)
                                     when (task.state) {
                                         TaskState.PERMISSION -> TextButton(onClick = { tab = 1 }) { Text("开启所需权限") }
                                         TaskState.APPROVAL -> {
-                                            TextButton(onClick = { TaskActions.respond(context, task.id, "approve", token = task.approvalToken) }) { Text("允许一次") }
+                                            TextButton(onClick = {
+                                                TaskActions.respond(context, task.id, "approve", token = task.approvalToken)
+                                                returnToApprovedApp(task)
+                                            }) { Text("允许一次") }
                                             if (task.approvedSuggestion) {
-                                                TextButton(onClick = { TaskActions.respond(context, task.id, "always", token = task.approvalToken) }) { Text("此目录内同类操作以后自动允许") }
+                                                if (task.engineVersion < 2 || task.steps.getOrNull(task.cursor)?.let { com.miniichat.tasks.agent.AgentPolicy.canRemember(it) } == true)
+                                                    TextButton(onClick = { TaskActions.respond(context, task.id, "always", token = task.approvalToken); returnToApprovedApp(task) }) { Text("此范围内同类操作以后自动允许") }
                                                 TextButton(onClick = { TaskActions.respond(context, task.id, "skip", token = task.approvalToken) }) { Text("跳过此步") }
                                             }
                                         }
                                         TaskState.QUESTION -> {
+                                            if (task.engineVersion >= 2 && task.neededPermission == "handoff") TextButton(onClick = {
+                                                scope.launch { runCatching { com.miniichat.tasks.agent.AgentActions.launchSystem(context, task.id, task.approvalToken) }
+                                                    .onFailure { message = it.message ?: "无法打开系统操作" } }
+                                            }) { Text("打开系统操作") }
                                             task.steps.getOrNull(task.cursor)?.options?.forEach { option ->
                                                 TextButton(onClick = { TaskActions.respond(context, task.id, "answer", option, task.approvalToken) }) { Text(option) }
                                             }
@@ -117,6 +136,10 @@ fun TasksScreen(onBack: () -> Unit) {
                                         else -> if (TaskActions.active(task.state)) TextButton(onClick = { TaskActions.respond(context, task.id, "pause") }) { Text("暂停") }
                                     }
                                     if (task.state !in setOf(TaskState.DONE, TaskState.CANCELLED)) TextButton(onClick = { TaskActions.respond(context, task.id, "cancel") }) { Text("取消后续操作") }
+                                    if (task.engineVersion >= 2 && task.state in setOf(TaskState.PERMISSION, TaskState.FAILED, TaskState.PAUSED)) TextButton(onClick = {
+                                        store.change(task.id) { it.copy(allowedPackages = TaskActions.preferences(context).getStringSet("agent_apps", emptySet()).orEmpty().toList()) }
+                                        message = "已把你在权限页选定的应用授权给此任务，可继续原任务"
+                                    }) { Text("更新此任务的应用授权") }
                                     TextButton(onClick = { selected = if (selected == task.id) null else task.id }) { Text("执行记录") }
                                     if (selected == task.id) {
                                         Text("模型：${task.model}\n服务在任务创建时锁定。", style = MaterialTheme.typography.bodySmall)
@@ -128,7 +151,7 @@ fun TasksScreen(onBack: () -> Unit) {
                     }
                     1 -> {
                         Text("权限由你掌握", style = MaterialTheme.typography.titleLarge)
-                        Text("Android 11 起目录选择器不能授权整个下载目录，因此需要系统“所有文件访问”。工具仍只允许操作指定的下载目录范围，不申请无障碍权限。")
+                        Text("系统文件权限只用于你在任务中指定的共享目录。不访问其他应用私有目录，不获取Root。普通文件可复制、移动、改名；删除改为可恢复区，每次确认。")
                         Button(onClick = {
                             if (Build.VERSION.SDK_INT >= 30) settings(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, true)
                             else runtime.launch(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE))
@@ -139,7 +162,7 @@ fun TasksScreen(onBack: () -> Unit) {
                         }) { Text("允许任务和角色通知") }
                         HorizontalDivider()
                         Text("屏幕边缘陪伴", style = MaterialTheme.typography.titleMedium)
-                        Text("拖动头像；点击快速聊天、回复确认，长按快捷操作。不读屏、不截图、不模拟点击。快速聊天是临时会话，关闭头像后不保留；任务持久保存。")
+                        Text("拖动头像；点击快速聊天、回复确认，长按快捷操作。快速聊天是临时会话，关闭头像后不保留；任务持久保存。页面操作需要单独开启下面的服务及应用名单。")
                         Button(onClick = {
                             if (!overlayGranted) settings(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, true)
                             else runCatching { ContextCompat.startForegroundService(context, Intent(context, PetOverlayService::class.java)) }
@@ -149,10 +172,22 @@ fun TasksScreen(onBack: () -> Unit) {
                         Text("强行停止后需重新打开应用才能恢复。重启后打开应用可恢复任务，头像需主动开启。省电限制可能延后执行和提醒。")
                         HorizontalDivider()
                         Text("操作自动批准", style = MaterialTheme.typography.titleMedium)
-                        val approvals = remember(revision, refresh) { TaskActions.preferences(context).all.filter { it.key.startsWith("approve:") && it.value == true }.keys }
+                        val approvals = remember(revision, refresh) { TaskActions.preferences(context).all.filter { (it.key.startsWith("approve:") || it.key.startsWith("agent:")) && it.value == true }.keys }
                         Text(approvals.joinToString("\n") { it.removePrefix("approve:") }.ifBlank { "暂无；首次移动、改名和建文件夹都会询问。" })
                         TextButton(onClick = { TaskActions.preferences(context).edit().apply { approvals.forEach { remove(it) } }.commit(); refresh++ }) { Text("撤销所有自动批准") }
                         TextButton(onClick = { settings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS) }) { Text("通知触发：管理通知访问") }
+                        Text("页面与通知操作授权", style = MaterialTheme.typography.titleMedium)
+                        Text("无障碍可读取页面文字并点击、滚动、输入。只有下面选中的应用可被任务使用，读取/点击/输入每次确认。密码页面和系统授权页面不操作。可随时关闭服务或撤销名单。")
+                        TextButton(onClick = { settings(Settings.ACTION_ACCESSIBILITY_SETTINGS) }) { Text("管理无障碍任务服务") }
+                        var allowedApps by remember(refresh) { mutableStateOf(TaskActions.preferences(context).getStringSet("agent_apps", emptySet()).orEmpty().toSet()) }
+                        var appList by remember { mutableStateOf(emptyMap<String, String>()) }
+                        LaunchedEffect(Unit) { appList = withContext(Dispatchers.IO) { com.miniichat.tasks.agent.NativePhoneTools.apps(context).filterKeys(com.miniichat.tasks.agent.AgentPolicy::validPackage) } }
+                        appList.toList().sortedBy { it.second }.forEach { (pkg, label) ->
+                            Row { Checkbox(pkg in allowedApps, { yes ->
+                                allowedApps = if (yes) allowedApps + pkg else allowedApps - pkg
+                                TaskActions.preferences(context).edit().putStringSet("agent_apps", allowedApps).apply()
+                            }); Text(label, Modifier.padding(top = 12.dp)) }
+                        }
                         TextButton(onClick = { settings(Settings.ACTION_USAGE_ACCESS_SETTINGS) }) { Text("打开应用触发：管理使用情况访问") }
                         TextButton(onClick = { runtime.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) }) { Text("识别 Wi-Fi 名称：允许精确位置") }
                         TextButton(onClick = { settings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, true) }) { Text("系统权限：可选设为始终允许位置") }

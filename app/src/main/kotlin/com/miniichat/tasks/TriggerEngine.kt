@@ -179,6 +179,8 @@ class EventDecisionWorker(context: Context, params: WorkerParameters) : Coroutin
 
 /** System-granted listener. Only explicitly selected packages' event types are used, NEVER their text. */
 class TaskNotificationListener : NotificationListenerService() {
+    override fun onListenerConnected() { com.miniichat.tasks.agent.NotificationAccess.listener = this }
+    override fun onListenerDisconnected() { com.miniichat.tasks.agent.NotificationAccess.listener = null }
     private val events = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null || sbn.packageName == packageName || sbn.isOngoing) return
@@ -188,5 +190,5 @@ class TaskNotificationListener : NotificationListenerService() {
                 .forEach { TriggerEngine.event(this@TaskNotificationListener, it.id, "用户选定的应用发来一条通知；不读取通知正文") }
         }
     }
-    override fun onDestroy() { events.cancel(); super.onDestroy() }
+    override fun onDestroy() { com.miniichat.tasks.agent.NotificationAccess.listener = null; events.cancel(); super.onDestroy() }
 }

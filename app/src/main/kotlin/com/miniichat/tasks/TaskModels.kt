@@ -24,7 +24,7 @@ data class PhoneStep(
     val approved: Boolean = false, val done: Boolean = false,
     // Write-ahead receipt: persist the exact target and fingerprint BEFORE moving anything.
     val prepared: Boolean = false, val resolvedTarget: String = "", val fingerprint: String = "",
-    val result: String = ""
+    val result: String = "", val arguments: Map<String, String> = emptyMap()
 )
 
 @Serializable
@@ -42,6 +42,10 @@ data class PhoneTask(
     val approvedSuggestion: Boolean = true, val sourceRule: String = "",
     val approvalToken: String = UUID.randomUUID().toString(),
     val noticeOnly: Boolean = false,
+    val engineVersion: Int = 1, val rootDirectory: String = "Download",
+    val allowedPackages: List<String> = emptyList(), val neededPermission: String = "",
+    val observations: List<String> = emptyList(), val rounds: Int = 0,
+    val goalSummary: String = "", val consecutiveErrors: Int = 0,
     val createdAt: Long = System.currentTimeMillis(), val updatedAt: Long = createdAt
 )
 

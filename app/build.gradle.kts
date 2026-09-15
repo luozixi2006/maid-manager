@@ -7,11 +7,11 @@ plugins {
 
 val suppliedVersionCode = providers.gradleProperty("BUILD_VERSION_CODE").orNull
 val buildVersionCode = when {
-    suppliedVersionCode == null -> 300000005
+    suppliedVersionCode == null -> 300000006
     suppliedVersionCode.toIntOrNull()?.let { it in 1..2_100_000_000 } == true -> suppliedVersionCode.toInt()
     else -> error("BUILD_VERSION_CODE must be an integer from 1 to 2100000000")
 }
-val buildVersionName = providers.gradleProperty("BUILD_VERSION_NAME").orNull ?: "3.0.5"
+val buildVersionName = providers.gradleProperty("BUILD_VERSION_NAME").orNull ?: "3.0.6"
 require(buildVersionName.matches(Regex("[0-9A-Za-z][0-9A-Za-z._+-]{0,63}"))) {
     "BUILD_VERSION_NAME contains unsupported characters"
 }
@@ -180,6 +180,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.13")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

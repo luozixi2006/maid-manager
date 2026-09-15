@@ -1,0 +1,3 @@
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="zh">
+    <string name="phone_accessibility_description">仅在你启动任务并授权具体应用后读取页面。页面数据经确认发送到你选择的AI服务；点击和输入逐次确认。不会自动开启系统权限，不读取密码页面，不在后台监视所有应用。可随时在这里关闭。</string>
+</resources>

@@ -64,6 +64,11 @@
             <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
         </service>
         <receiver android:name="com.miniichat.tasks.TaskActionReceiver" android:exported="false" />
+        <service android:name="com.miniichat.tasks.agent.PhoneAccessibility" android:exported="true"
+            android:label="女仆管理器 · 任务页面操作" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/phone_accessibility" />
+        </service>
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"
