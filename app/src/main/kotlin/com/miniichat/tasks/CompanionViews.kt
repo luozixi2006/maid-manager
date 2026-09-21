@@ -27,12 +27,12 @@ internal class CompanionViews(val context: Context, dark: Boolean) {
         setLineSpacing(dp(3).toFloat(), 1f); includeFontPadding = false
     }
     fun action(text: String, primary: Boolean = false, click: () -> Unit) = TextView(context).apply {
-        this.text = text; textSize = 14f; gravity = Gravity.CENTER; minHeight = dp(44)
+        this.text = text; textSize = 13f; gravity = Gravity.CENTER; minHeight = dp(38)
         setTextColor(if (primary) Color.WHITE else ink)
-        background = RippleDrawable(ColorStateList.valueOf(0x22000000), shape(if (primary) Color.parseColor("#315FBB") else inset, 12), null)
-        setPadding(dp(12), dp(10), dp(12), dp(10)); isClickable = true; isFocusable = true
+        background = RippleDrawable(ColorStateList.valueOf(0x22000000), shape(if (primary) Color.parseColor("#315FBB") else inset, 10), null)
+        setPadding(dp(10), dp(6), dp(10), dp(6)); isClickable = true; isFocusable = true
         filterTouchesWhenObscured = true; setOnClickListener { click() }
-        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) }
+        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) }
     }
     fun avatar(path: String, size: Int, name: String = "陪"): ImageView = object : ImageView(context) {
         override fun onDraw(canvas: android.graphics.Canvas) {
@@ -60,10 +60,10 @@ internal class CompanionViews(val context: Context, dark: Boolean) {
         clipToOutline = true; background = shape(inset, size / 2)
     }
     fun icon(symbol: String, description: String, click: () -> Unit) = TextView(context).apply {
-        text = symbol; textSize = 23f; gravity = Gravity.CENTER; setTextColor(muted)
-        layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
+        text = symbol; textSize = 21f; gravity = Gravity.CENTER; setTextColor(muted)
+        layoutParams = LinearLayout.LayoutParams(dp(38), dp(38))
         contentDescription = description; isFocusable = true; setOnClickListener { click() }
-        background = RippleDrawable(ColorStateList.valueOf(0x22000000), shape(Color.TRANSPARENT, 22), null)
+        background = RippleDrawable(ColorStateList.valueOf(0x22000000), shape(Color.TRANSPARENT, 19), null)
     }
     fun header(name: String, state: String, path: String, collapse: () -> Unit, close: () -> Unit, drag: (View) -> Unit): LinearLayout = row().apply {
         contentDescription = "拖动窗口标题栏"; drag(this)

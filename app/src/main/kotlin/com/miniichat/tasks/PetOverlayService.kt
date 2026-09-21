@@ -188,16 +188,16 @@ class PetOverlayService : Service() {
             val tabs = ui.row().apply { gravity = Gravity.TOP }
             listOf("聊天", "工作").forEachIndexed { i, label ->
                 tabs.addView(ui.action(label, (i == 1) == workMode) { workMode = i == 1; shortcut = false; quickReply = ""; render() },
-                    LinearLayout.LayoutParams(0, dp(44), 1f).apply { topMargin = dp(8); marginEnd = dp(4) })
+                    LinearLayout.LayoutParams(0, dp(38), 1f).apply { topMargin = dp(4); marginEnd = dp(4) })
             }
             panel.addView(tabs)
             if (!workMode) {
                 val controls = ui.row()
                 if (ScreenCompanion.enabled.value || ScreenShare.running.value) {
-                    controls.addView(ui.action(if (chatting) "正在看…" else "看一眼", true) { lookAtScreen() }, LinearLayout.LayoutParams(0, dp(44), 1f))
-                    controls.addView(ui.action("停止感知", false) { ScreenCompanion.stop(this); render() }, LinearLayout.LayoutParams(0, dp(44), 1f))
-                    if (!ScreenShare.running.value) controls.addView(ui.action("共享画面", false) { ScreenShare.start(this) }, LinearLayout.LayoutParams(0, dp(44), 1f))
-                } else controls.addView(ui.action("共享画面给她看", false) { ScreenShare.start(this) }, LinearLayout.LayoutParams(-1, dp(44)))
+                    controls.addView(ui.action(if (chatting) "正在看…" else "看一眼", true) { lookAtScreen() }, LinearLayout.LayoutParams(0, dp(38), 1f))
+                    controls.addView(ui.action("停止感知", false) { ScreenCompanion.stop(this); render() }, LinearLayout.LayoutParams(0, dp(38), 1f))
+                    if (!ScreenShare.running.value) controls.addView(ui.action("共享画面", false) { ScreenShare.start(this) }, LinearLayout.LayoutParams(0, dp(38), 1f))
+                } else controls.addView(ui.action("共享画面给她看", false) { ScreenShare.start(this) }, LinearLayout.LayoutParams(-1, dp(38)))
                 panel.addView(controls)
             }
             val body = ui.column().apply { setPadding(0, dp(10), 0, dp(8)) }

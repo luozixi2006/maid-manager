@@ -11,10 +11,14 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.os.Build
+import android.provider.Settings
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.Person
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.createBitmap
+import androidx.core.graphics.drawable.IconCompat
 import com.miniichat.MainActivity
 import com.miniichat.R
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,6 +51,28 @@ object ProactiveNotifications {
     const val EXTRA_CONVERSATION = "proactive_conversation_id"
     private const val CHANNEL_ID = "character_messages"
 
+    fun blockedReason(context: Context): String? {
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context,
+                Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return "通知权限未开启"
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return "系统通知已关闭"
+        val manager = context.getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= 26 && manager.getNotificationChannel(CHANNEL_ID)?.importance ==
+            NotificationManager.IMPORTANCE_NONE) return "角色消息通知已关闭"
+        return null
+    }
+
+    fun settingsIntent(context: Context): Intent {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val channelSettings = Build.VERSION.SDK_INT >= 26 &&
+            NotificationManagerCompat.from(context).areNotificationsEnabled() &&
+            manager.getNotificationChannel(CHANNEL_ID) != null
+        return Intent(if (channelSettings) Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS
+            else Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            if (channelSettings) putExtra(Settings.EXTRA_CHANNEL_ID, CHANNEL_ID)
+        }
+    }
+
     fun publish(
         context: Context,
         characterName: String,
@@ -57,12 +83,8 @@ object ProactiveNotifications {
         com.miniichat.tasks.PetMessages.show("$characterName：$message", destination.conversationId)
         if (AppVisibility.isForeground) {
             ProactiveNavigation.showForegroundNotice("$characterName：$message")
-            return
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) return
+        if (blockedReason(context) != null) return
 
         val manager = context.getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -89,21 +111,39 @@ object ProactiveNotifications {
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val avatar = loadAvatar(context, avatarPath)
+        val sender = Person.Builder().setName(characterName).apply {
+            avatar?.let { setIcon(IconCompat.createWithBitmap(it)) }
+        }.build()
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_email)
             .setContentTitle(characterName)
             .setContentText(message)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setStyle(NotificationCompat.MessagingStyle(Person.Builder().setName("我").build())
+                .setGroupConversation(false)
+                .addMessage(message, System.currentTimeMillis(), sender))
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
-            .setLargeIcon(loadAvatar(context, avatarPath))
+            .setLargeIcon(avatar)
             .build()
-        NotificationManagerCompat.from(context).notify(requestCode, notification)
+        try {
+            NotificationManagerCompat.from(context).notify(requestCode, notification)
+        } catch (_: SecurityException) {
+            // Permission can be revoked between checking it and posting; the conversation is already saved.
+            Log.w("ProactiveNotifications", "Notification permission changed before delivery")
+        }
     }
 
     private fun loadAvatar(context: Context, avatarPath: String?): Bitmap? {
         avatarPath?.takeIf { it.isNotBlank() && File(it).isFile }?.let { path ->
-            BitmapFactory.decodeFile(path)?.let { return it }
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(path, bounds)
+            val options = BitmapFactory.Options().apply { inSampleSize = 1 }
+            while (maxOf(bounds.outWidth, bounds.outHeight) / options.inSampleSize > 256) options.inSampleSize *= 2
+            BitmapFactory.decodeFile(path, options)?.let { return it }
         }
         val drawable = ContextCompat.getDrawable(context, R.mipmap.ic_launcher) ?: return null
         val width = drawable.intrinsicWidth.takeIf { it > 0 } ?: 128

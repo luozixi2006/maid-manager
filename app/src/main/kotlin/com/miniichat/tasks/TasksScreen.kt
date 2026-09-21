@@ -165,8 +165,14 @@ fun TasksScreen(onBack: () -> Unit, onPersona: () -> Unit = {}) {
                     1 -> {
                         CompanionSettings(refresh, { settings(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, true) }, { message = it }, onPersona)
                         AppGroup {
-                            PreferenceRow("角色消息通知", "离开应用后也能收到问候") {
-                                TextButton(onClick = { if (Build.VERSION.SDK_INT >= 33) runtime.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS)) else settings(Settings.ACTION_APP_NOTIFICATION_SETTINGS) }) { Text("允许通知") }
+                            val notificationStatus = remember(refresh) {
+                                com.miniichat.proactive.ProactiveNotifications.blockedReason(context) ?: "已开启 · 问候会显示在通知栏"
+                            }
+                            PreferenceRow("角色消息通知", notificationStatus) {
+                                TextButton(onClick = {
+                                    runCatching { context.startActivity(com.miniichat.proactive.ProactiveNotifications.settingsIntent(context)) }
+                                        .onFailure { message = "请在系统应用设置中开启角色消息通知" }
+                                }) { Text("通知设置") }
                             }
                         }
                     }

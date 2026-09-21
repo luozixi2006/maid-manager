@@ -29,6 +29,24 @@ import java.io.File
 @Config(sdk = [30], qualifiers = "zh-rCN-w393dp-h852dp-xhdpi", application = Application::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class FloatingWindowTest {
+    @Test fun compactButtonsKeepLongLabelsAndClickActions() {
+        val ui = CompanionViews(RuntimeEnvironment.getApplication(), false)
+        var clicked = false
+        val button = ui.action("允许本任务常规操作") { clicked = true }
+        button.measure(View.MeasureSpec.makeMeasureSpec(ui.dp(96), View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        button.layout(0, 0, button.measuredWidth, button.measuredHeight)
+        assertEquals(ui.dp(38), button.minHeight)
+        assertEquals(ui.dp(6), button.paddingTop)
+        assertTrue(button.lineCount > 1)
+        assertTrue(button.height >= button.layout.height + button.paddingTop + button.paddingBottom)
+        button.performClick()
+        assertTrue(clicked)
+        val close = ui.icon("×", "关闭陪伴") {}
+        assertEquals(ui.dp(38), close.layoutParams.width)
+        assertEquals(ui.dp(38), close.layoutParams.height)
+    }
+
     private fun field(name: String) = PetOverlayService::class.java.getDeclaredField(name).apply { isAccessible = true }
     private fun all(view: View): List<View> = listOf(view) + if (view is ViewGroup) (0 until view.childCount).flatMap { all(view.getChildAt(it)) } else emptyList()
     @Test fun actualFloatingChatKeepsFooterVisibleWithKeyboardAndCanSwitchToTasks() {
@@ -54,6 +72,7 @@ class FloatingWindowTest {
         try {
             capture("floating-chat")
             val tabs = panel.getChildAt(2) as LinearLayout
+            assertEquals((38 * service.resources.displayMetrics.density).toInt(), tabs.getChildAt(0).height)
             for (i in 0 until tabs.childCount) assertTrue(tabs.getChildAt(i).bottom <= tabs.height)
             assertTrue(all(panel).filterIsInstance<TextView>().any { it.text.toString().contains("聊点轻松") })
             val insets = WindowInsetsCompat.Builder().setInsets(WindowInsetsCompat.Type.systemBars(), Insets.of(0, 48, 0, 48))
