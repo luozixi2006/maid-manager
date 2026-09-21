@@ -38,6 +38,7 @@ fun TasksScreen(onBack: () -> Unit, onPersona: () -> Unit = {}) {
     var message by remember { mutableStateOf("") }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var refresh by remember { mutableIntStateOf(0) }
+    val accessibilityConnected by com.miniichat.tasks.agent.AccessibilityConnection.connected.collectAsState()
     val openCompanion by TaskNavigation.companion.collectAsState()
     LaunchedEffect(openCompanion) { if (openCompanion) { tab = 1; TaskNavigation.companion.value = false } }
     val scope = rememberCoroutineScope()
@@ -61,7 +62,10 @@ fun TasksScreen(onBack: () -> Unit, onPersona: () -> Unit = {}) {
             "apps" -> { tab = 0; message = "请在“允许操作的应用”里选择应用；已有任务可点“应用到未完成任务”。" }
             "files" -> if (Build.VERSION.SDK_INT >= 30) settings(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, true)
                 else runtime.launch(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE))
-            "accessibility" -> settings(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            "accessibility" -> if (com.miniichat.tasks.agent.AccessibilityConnection.enabled(context)) {
+                message = com.miniichat.tasks.agent.AccessibilityConnection.description(context)
+                scope.launch(Dispatchers.IO) { TaskActions.recover(context) }
+            } else settings(Settings.ACTION_ACCESSIBILITY_SETTINGS)
             "notifications" -> settings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
             else -> settings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, true)
         }
@@ -105,7 +109,7 @@ fun TasksScreen(onBack: () -> Unit, onPersona: () -> Unit = {}) {
                             PreferenceRow("任务通知", "接收进度与确认") {
                                 TextButton(onClick = { if (Build.VERSION.SDK_INT >= 33) runtime.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS)) else settings(Settings.ACTION_APP_NOTIFICATION_SETTINGS) }) { Text("管理") }
                             }
-                            PreferenceRow("页面操作", "仅限你授权的应用") {
+                            PreferenceRow("页面操作", remember(refresh, accessibilityConnected) { com.miniichat.tasks.agent.AccessibilityConnection.description(context) }) {
                                 TextButton(onClick = { settings(Settings.ACTION_ACCESSIBILITY_SETTINGS) }) { Text("管理") }
                             }
                             PreferenceRow("通知访问") { TextButton(onClick = { settings(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS) }) { Text("管理") } }

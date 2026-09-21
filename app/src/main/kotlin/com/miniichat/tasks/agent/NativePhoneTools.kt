@@ -68,7 +68,7 @@ object NativePhoneTools {
         }
         "open_url", "share_file", "calendar_event" -> throw HandOff("请点“打开系统操作”在前台执行；分享收件人、日程保存由你确认")
         "read_screen", "tap", "type_text", "submit_search", "scroll", "back", "home" -> withContext(Dispatchers.Main) {
-            (PhoneAccessibility.current ?: throw NeedsPermission("accessibility", "需要开启无障碍服务；仅控制任务授权的应用" )).execute(task, step)
+            (PhoneAccessibility.current ?: throw NeedsPermission("accessibility", AccessibilityConnection.description(context))).execute(task, step)
         }
         else -> error("原生工具未实现")
     }

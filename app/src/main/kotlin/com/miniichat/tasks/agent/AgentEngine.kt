@@ -37,7 +37,7 @@ class AgentEngine(private val context: Context) {
                 }
                 if (spec.permission == "files" && !task.fileConsent) throw NeedsPermission("file_consent", "此任务需要读取${task.rootDirectory}内的文件，并把必要文字交给当前模型。请确认目录授权后继续。")
                 if (spec.permission == "files" && !DownloadsTools(context, "").permitted()) throw NeedsPermission("files", "需要文件访问权限")
-                if (spec.permission == "accessibility" && PhoneAccessibility.current == null) throw NeedsPermission("accessibility", "需要你在系统中开启无障碍服务")
+                if (spec.permission == "accessibility" && PhoneAccessibility.current == null) throw NeedsPermission("accessibility", AccessibilityConnection.description(context))
                 if (spec.permission == "notifications" && NotificationAccess.listener == null) throw NeedsPermission("notifications", "需要开启系统通知访问")
                 if (spec.permission == "accessibility" || step.tool == "open_app") {
                     val pkg = step.arguments["package"].orEmpty()

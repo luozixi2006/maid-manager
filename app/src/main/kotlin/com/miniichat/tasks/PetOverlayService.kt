@@ -30,8 +30,9 @@ object PetMessages {
     fun show(text: String) { notice.value = text.take(1200) }
 }
 
-/** A visible, user-started companion. No accessibility, screen capture or invisible touch injection. */
+/** Visible, revocable companion. Screen sharing needs a separate system-approved session. */
 class PetOverlayService : Service() {
+    companion object { val captureHidden = kotlinx.coroutines.flow.MutableStateFlow(false) }
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var wm: WindowManager
     private var view: LinearLayout? = null
@@ -60,7 +61,8 @@ class PetOverlayService : Service() {
     private var destroyed = false
     private var themeMode = "system"
     private val lookListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == CompanionAppearance.AVATAR || key == CompanionAppearance.POPUPS) serviceScope.launch { render() }
+        if (key == WorkDefaults.ROUTINE) pendingRoutine = WorkDefaults.routine(this)
+        if (key == CompanionAppearance.AVATAR || key == CompanionAppearance.POPUPS || key == WorkDefaults.ROUTINE) serviceScope.launch { render() }
     }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onCreate() {
@@ -77,7 +79,8 @@ class PetOverlayService : Service() {
         else startForeground(4102, notification)
         wm = getSystemService(WindowManager::class.java)
         val prefs = TaskActions.preferences(this)
-        ScreenCompanion.enabled.value = false
+        ScreenCompanion.enabled.value = prefs.getBoolean(ScreenCompanion.REMEMBER, false) && prefs.getStringSet(ScreenCompanion.APPS, emptySet()).orEmpty().isNotEmpty()
+        pendingRoutine = WorkDefaults.routine(this)
         prefs.registerOnSharedPreferenceChangeListener(lookListener)
         CompanionRuntime.running.value = true
         params = WindowManager.LayoutParams(dp(80), WindowManager.LayoutParams.WRAP_CONTENT,
@@ -94,6 +97,8 @@ class PetOverlayService : Service() {
                 name = it.displayName; avatar = it.avatarPath.orEmpty()
             }
             render()
+            launch { captureHidden.collect { hidden -> view?.visibility = if (hidden) View.INVISIBLE else View.VISIBLE } }
+            launch { ScreenShare.running.collect { render() } }
             launch { ScreenCompanion.enabled.collect { observing ->
                 val pause = PendingIntent.getService(this@PetOverlayService, 43, Intent(this@PetOverlayService, PetOverlayService::class.java).setAction("pause_screen"), PendingIntent.FLAG_IMMUTABLE)
                 val notice = NotificationCompat.Builder(this@PetOverlayService, channel).setSmallIcon(android.R.drawable.ic_menu_info_details)
@@ -150,7 +155,7 @@ class PetOverlayService : Service() {
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "close") stopSelf()
-        if (intent?.action == "pause_screen") ScreenCompanion.enabled.value = false
+        if (intent?.action == "pause_screen") ScreenCompanion.stop(this)
         return START_NOT_STICKY // Never secretly restart a user-dismissed overlay.
     }
     private fun render() {
@@ -164,7 +169,7 @@ class PetOverlayService : Service() {
         val panel = ui.column().apply { setPadding(dp(if (expanded) 12 else 6), dp(if (expanded) 12 else 6), dp(if (expanded) 12 else 6), dp(if (expanded) 12 else 6)) }
         val path = CompanionAppearance.resolve(CompanionAppearance.avatar(this), if (workMode) task?.avatarPath else null, avatar)
         val title = if (workMode) task?.characterName ?: name else name
-        val state = if (chatting) "正在回复" else if (workMode) task?.statusLabel ?: "可以交代一件事" else if (ScreenCompanion.enabled.value) "页面陪伴已开启" else if (PetMessages.notice.value.isNotBlank()) "有话想和你说" else "陪着你"
+        val state = if (chatting) "正在回复" else if (workMode) task?.statusLabel ?: "可以交代一件事" else if (ScreenShare.running.value) "画面共享中" else if (ScreenCompanion.enabled.value) "文字感知已开启" else if (PetMessages.notice.value.isNotBlank()) "有话想和你说" else "陪着你"
         if (!expanded) {
             val bubble = FrameLayout(this)
             val photo = ui.avatar(path, 52, title).apply { contentDescription = title + "，" + state + "，点按展开，长按菜单" }
@@ -186,6 +191,15 @@ class PetOverlayService : Service() {
                     LinearLayout.LayoutParams(0, dp(44), 1f).apply { topMargin = dp(8); marginEnd = dp(4) })
             }
             panel.addView(tabs)
+            if (!workMode) {
+                val controls = ui.row()
+                if (ScreenCompanion.enabled.value || ScreenShare.running.value) {
+                    controls.addView(ui.action(if (chatting) "正在看…" else "看一眼", true) { lookAtScreen() }, LinearLayout.LayoutParams(0, dp(44), 1f))
+                    controls.addView(ui.action("停止感知", false) { ScreenCompanion.stop(this); render() }, LinearLayout.LayoutParams(0, dp(44), 1f))
+                    if (!ScreenShare.running.value) controls.addView(ui.action("共享画面", false) { ScreenShare.start(this) }, LinearLayout.LayoutParams(0, dp(44), 1f))
+                } else controls.addView(ui.action("共享画面给她看", false) { ScreenShare.start(this) }, LinearLayout.LayoutParams(-1, dp(44)))
+                panel.addView(controls)
+            }
             val body = ui.column().apply { setPadding(0, dp(10), 0, dp(8)) }
             fun action(text: String, primary: Boolean = false, click: () -> Unit) { body.addView(ui.action(text, primary, click)) }
             if (shortcut) {
@@ -200,9 +214,9 @@ class PetOverlayService : Service() {
                     action("允许本任务常规操作", true) { respond(target, "allow_routine"); bulkTarget = null; render() }
                     action("取消") { bulkTarget = null; render() }
                 } else if (pendingGoal.isNotBlank()) {
-                    body.addView(ui.label("交给我：" + pendingGoal))
-                    body.addView(ui.label("文件范围：" + FolderSelection.label(pendingFolder) + "。允许按需读取，并将必要文字发送给当前模型？", 13, true))
-                    action(if (submitting) "正在保存…" else "允许并开始", true) { if (!submitting) submitTask() }
+                    body.addView(ui.label(pendingGoal))
+                    body.addView(ui.label("文件范围：" + FolderSelection.label(pendingFolder) + "；需要读取文件时再问你。", 13, true))
+                    action(if (submitting) "正在准备…" else "重试提交", true) { if (!submitting) submitTask() }
                     body.addView(Switch(this).apply {
                         text = "本任务常规操作自动允许"; setTextColor(ui.ink); isChecked = pendingRoutine
                         setOnCheckedChangeListener { _, enabled -> pendingRoutine = enabled }
@@ -232,17 +246,8 @@ class PetOverlayService : Service() {
                 } ?: body.addView(ui.label("整理各种文件、查资料、写清单……直接告诉我。重要操作会先问你。"))
                 action("工作权限设置") { TaskNavigation.permission.value = "apps"; startActivity(TaskNotices.openIntent(this)) }
             } else {
-                if (ScreenCompanion.enabled.value) {
-                    action("看看当前页面并和我说句话") { if (!chatting) {
-                        chatting = true; render()
-                        serviceScope.launch {
-                            try { quickReply = withContext(Dispatchers.IO) { ScreenCompanion.test(this@PetOverlayService, observe = true) } }
-                            catch (e: CancellationException) { throw e }
-                            catch (e: Exception) { quickReply = e.message?.take(180) ?: "当前页面暂时无法读取" }
-                            finally { chatting = false; render() }
-                        }
-                    } }
-                    action("暂停页面陪伴") { ScreenCompanion.enabled.value = false; render() }
+                if (ScreenCompanion.enabled.value || ScreenShare.running.value) {
+                    body.addView(ui.label(if (ScreenShare.running.value) ScreenShare.status.value else ScreenCompanion.status.value, 11, true))
                 }
                 val messages = conversation?.messages.orEmpty().takeLast(30)
                 if (messages.isEmpty()) body.addView(ui.label(PetMessages.notice.value.ifBlank { "我在，想聊点什么？" }))
@@ -286,7 +291,7 @@ class PetOverlayService : Service() {
                     draft = ""; input.setText("")
                     if (!workMode) chat(text)
                     else if (task?.state == TaskState.QUESTION) { val t = task!!; TaskActions.respond(this, t.id, "answer", text, t.approvalToken) }
-                    else { pendingGoal = text; pendingFolder = FolderSelection.saved(this); render() }
+                    else { pendingGoal = text; pendingFolder = FolderSelection.saved(this); submitTask() }
                 }
             }.apply { isEnabled = !chatting && !submitting }, LinearLayout.LayoutParams(dp(64), -2).apply { marginStart = dp(8) })
             panel.addView(footer, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
@@ -310,6 +315,7 @@ class PetOverlayService : Service() {
         }
         if (old != null) runCatching { wm.removeView(old) }
         view = panel
+        panel.visibility = if (captureHidden.value) View.INVISIBLE else View.VISIBLE
         params.width = if (expanded) OverlaySizing.fit(dp(TaskActions.preferences(this).getInt("pet_width", 360)), dp(280), resources.displayMetrics.widthPixels - dp(24)) else dp(64)
         params.height = if (expanded) { if (focused && previousHeight > 0) previousHeight else OverlaySizing.fit(dp(TaskActions.preferences(this).getInt("pet_height", 560)), dp(330), resources.displayMetrics.heightPixels - dp(64)) } else WindowManager.LayoutParams.WRAP_CONTENT
         params.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or if (expanded && focused) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -325,11 +331,21 @@ class PetOverlayService : Service() {
         submitting = true; render()
         serviceScope.launch {
             try {
-                val created = withContext(Dispatchers.IO) { TaskActions.create(this@PetOverlayService, goal, rootDirectory = folder, autoAllowRoutine = pendingRoutine) }
+                val created = withContext(Dispatchers.IO) { TaskActions.create(this@PetOverlayService, goal, rootDirectory = folder, autoAllowRoutine = pendingRoutine, fileConsent = false) }
                 task = created; pendingGoal = ""; quickReply = "已保存，会在后台继续；需要确认时来问你。"
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) { quickReply = e.message?.take(150) ?: "暂时无法创建任务" }
             finally { submitting = false; render() }
+        }
+    }
+    private fun lookAtScreen() {
+        if (chatting) return
+        chatting = true; render()
+        serviceScope.launch {
+            try { quickReply = withContext(Dispatchers.IO) { ScreenCompanion.test(this@PetOverlayService, observe = true) } }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { ScreenCompanion.reportFailure(e); quickReply = e.message?.take(180) ?: "当前页面暂时无法读取" }
+            finally { chatting = false; render() }
         }
     }
     private fun attachDrag(handle: View, toggleOnTap: Boolean = true) {
@@ -402,6 +418,7 @@ class PetOverlayService : Service() {
         destroyed = true
         CompanionRuntime.running.value = false
         ScreenCompanion.enabled.value = false
+        ScreenShare.stop(this)
         TaskActions.preferences(this).unregisterOnSharedPreferenceChangeListener(lookListener)
         serviceScope.cancel(); view?.let { runCatching { wm.removeView(it) } }; view = null
         super.onDestroy()

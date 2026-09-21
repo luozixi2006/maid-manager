@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
@@ -37,6 +38,8 @@
         android:theme="@style/Theme.MaidManager"
         android:enableOnBackInvokedCallback="true">
 
+        <activity android:name="com.miniichat.tasks.ScreenShareConsentActivity" android:exported="false" android:excludeFromRecents="true" />
+        <service android:name="com.miniichat.tasks.ScreenShareService" android:exported="false" android:foregroundServiceType="mediaProjection" />
         <activity
             android:name="com.miniichat.MainActivity"
             android:enabled="true"

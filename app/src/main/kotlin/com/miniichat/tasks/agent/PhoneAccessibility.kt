@@ -9,12 +9,23 @@ import android.view.accessibility.AccessibilityWindowInfo
 import com.miniichat.tasks.*
 import java.security.MessageDigest
 import kotlinx.serialization.encodeToString
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
 
 class PhoneAccessibility : AccessibilityService() {
-    override fun onServiceConnected() { current = this }
+    private val connectionScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+    override fun onServiceConnected() {
+        current = this
+        AccessibilityConnection.connected.value = true
+        connectionScope.launch { TaskActions.recover(applicationContext) }
+    }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
     override fun onInterrupt() = Unit
-    override fun onDestroy() { if (current === this) current = null; super.onDestroy() }
+    override fun onDestroy() {
+        if (current === this) { current = null; AccessibilityConnection.connected.value = false }
+        connectionScope.cancel()
+        super.onDestroy()
+    }
     private fun nodes(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
         val result = mutableListOf<AccessibilityNodeInfo>()
         fun visit(node: AccessibilityNodeInfo, depth: Int) {

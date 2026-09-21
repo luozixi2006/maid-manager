@@ -27,7 +27,7 @@ object TaskActions {
     fun automatic(context: Context, task: PhoneTask, tool: String): Boolean =
         preferences(context).getBoolean("approve:${task.scope}:$tool", false)
     suspend fun create(context: Context, goal: String, scope: String = "", suggestion: Boolean = false,
-                       ruleId: String = "", rootDirectory: String = "Download", autoAllowRoutine: Boolean = false,
+                       ruleId: String = "", rootDirectory: String = "Download", autoAllowRoutine: Boolean = WorkDefaults.routine(context),
                        fileConsent: Boolean = true): PhoneTask {
         require(goal.isNotBlank() && goal.length <= 4000) { "请简要描述要完成的事情（最多 4000 字）" }
         ToolPolicy.relative(scope, true)

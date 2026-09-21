@@ -65,7 +65,10 @@ class UiVisualTest {
     }
     @Test fun workIsConversationAndHistoryLivesInDrawer() {
         compose.setContent { MaidManagerTheme("light", false) { WorkScreen({}, {}, "已选模型") } }
-        compose.onNodeWithText("想完成什么？").assertExists()
+        compose.onNodeWithText("告诉我目标，\n过程交给我").assertExists()
+        compose.onNodeWithText("应用内搜索").performClick()
+        compose.onNodeWithText("帮我在哔哩哔哩搜索").assertExists()
+        Assert.assertTrue(TaskStore.of(RuntimeEnvironment.getApplication()).all().isEmpty())
         compose.onNodeWithText("最近任务").assertDoesNotExist()
         capture("work-light")
         compose.onNodeWithContentDescription("工作记录").performClick()
@@ -76,6 +79,20 @@ class UiVisualTest {
         compose.setContent { MaidManagerTheme("dark", false) { WorkScreen({}, {}, "已选模型") } }
         compose.onNodeWithContentDescription("发送").assertExists()
         capture("work-dark")
+    }
+    @Test fun workRoutineDefaultRequiresExplicitConsentAndCanBeRevoked() {
+        val app = RuntimeEnvironment.getApplication()
+        WorkDefaults.remember(app, false)
+        compose.setContent { MaidManagerTheme("light", false) { WorkScreen({}, {}, "已选模型") } }
+        compose.onNodeWithText("每步先确认 · 权限与文件范围").performClick()
+        compose.onAllNodes(isToggleable())[0].performClick()
+        compose.onNodeWithText("常规步骤交给她处理").assertExists()
+        Assert.assertFalse(WorkDefaults.routine(app))
+        compose.onAllNodes(isToggleable()).filterToOne(hasAnyAncestor(isDialog())).performClick()
+        compose.onNodeWithText("允许常规操作").performClick()
+        Assert.assertTrue(WorkDefaults.routine(app))
+        compose.onAllNodes(isToggleable())[0].performClick()
+        Assert.assertFalse(WorkDefaults.routine(app))
     }
     @Test fun reasoningAndSourcesHaveSeparateContainers() {
         compose.setContent { MaidManagerTheme("dark", false) {
