@@ -24,6 +24,13 @@ macOS / Linux：
 
 APK 位于 `app/build/outputs/apk/debug/`。
 
+手表与共享层：`./gradlew :companion-core:testDebugUnitTest :watch:testDebugUnitTest :watch:assembleDebug`。
+手表 APK 在 `watch/build/outputs/apk/`。Release 使用仓库外 `WATCH_STORE_FILE` 指定已有手表升级 keystore，保留已安装测试包证书；不得提交私钥。CI Secret `ANDROID_WATCH_KEYSTORE_BASE64` 保存该文件，不使用每次运行重新生成的临时签名。手表首次用户测试时使用的本地调试证书被沿用；正式换签名需要单独迁移，不得让用户靠卸载清数据来普通更新。
+
+未授权上传手表私钥时，CI 仍编译手表并发布手机更新，手表 Release 在本机签名后只上传 APK。可选 Secret 未配置不会让手机更新失败；不会把 CI 临时调试签名的手表包作为升级包发布。
+
+手机包含约 57 MB 本地语义模型。仓库已包含固定哈希的 ONNX、词表与许可证，正常构建不下载权重。需重新导出时使用 `tools/export_memory_model.py` 的独立 Python 依赖和固定官方 revision；不要把下载缓存提交 Git。
+
 ## 本地 Release
 
 Release 不会回退到 Debug 签名。把 keystore 保存在仓库外，并通过环境变量或本机 Gradle 属性提供：

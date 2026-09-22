@@ -111,6 +111,27 @@ class FloatingWindowTest {
             assertTrue(TaskActions.preferences(service).getInt("pet_width", 0) > 0)
             all(panel).filterIsInstance<TextView>().first { it.text.toString() == "工作" }.performClick()
             assertTrue(field("workMode").getBoolean(service))
+            val workPanel = field("view").get(service) as LinearLayout
+            workPanel.measure(View.MeasureSpec.makeMeasureSpec(params.width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(params.height, View.MeasureSpec.EXACTLY))
+            workPanel.layout(0, 0, params.width, params.height)
+            val workInput = workPanel.findViewWithTag<EditText>("draft")
+            workInput.setText("收起后草稿还在")
+            workInput.requestFocus()
+            val collapse = workPanel.findViewWithTag<View>("collapse")
+            val position = android.graphics.Rect()
+            collapse.getDrawingRect(position)
+            workPanel.offsetDescendantRectToMyCoords(collapse, position)
+            val x = position.exactCenterX(); val y = position.exactCenterY()
+            assertTrue(workPanel.dispatchTouchEvent(MotionEvent.obtain(3, 3, MotionEvent.ACTION_DOWN, x, y, 0)))
+            // A simultaneous sync must not replace the window and swallow the UP/click.
+            render.invoke(service)
+            assertSame(workPanel, field("view").get(service))
+            assertTrue(workPanel.dispatchTouchEvent(MotionEvent.obtain(3, 50, MotionEvent.ACTION_UP, x, y, 0)))
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            assertFalse(field("expanded").getBoolean(service))
+            assertEquals("收起后草稿还在", field("draft").get(service))
+            assertEquals(WindowManager.LayoutParams.WRAP_CONTENT, params.height)
+            assertTrue(params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
         } finally {
             field("destroyed").setBoolean(service, true)
             (field("view").get(service) as? View)?.let { wm.removeView(it) }

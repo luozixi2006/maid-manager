@@ -1,12 +1,13 @@
 package com.miniichat.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -24,7 +25,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.miniichat.ChatViewModel
 import com.miniichat.data.ProviderConfig
@@ -143,11 +149,50 @@ fun AppRoot(vm: ChatViewModel) {
     ) {
         Column(Modifier.fillMaxSize()) {
         if (screen == Screen.Chat || screen == Screen.Work) {
-            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = androidx.compose.ui.unit.Dp(20f))) {
-                listOf(Screen.Chat to "聊天", Screen.Work to "工作").forEach { (destination, label) ->
-                    TextButton(onClick = { screen = destination }, modifier = Modifier.weight(1f)) {
-                        Text(label, style = MaterialTheme.typography.titleMedium,
-                            color = if (screen == destination) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = androidx.compose.ui.unit.Dp(20f)),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(modifier = Modifier.width(196.dp).height(48.dp), contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(17.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                    )
+                    Row(modifier = Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                        listOf(Screen.Chat to "聊天", Screen.Work to "工作").forEach { (destination, label) ->
+                            val selected = screen == destination
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .selectable(selected = selected, role = Role.Tab) { screen = destination },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(30.dp)
+                                        .padding(horizontal = 2.dp)
+                                        .clip(RoundedCornerShape(15.dp))
+                                        .background(if (selected) MaterialTheme.colorScheme.surface else Color.Transparent),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        label,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = if (selected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -305,8 +350,14 @@ fun AppRoot(vm: ChatViewModel) {
                 )
             }
             Screen.Memories -> {
+                val memoryQueueStatus by vm.memoryQueueStatus.collectAsState()
+                LaunchedEffect(memories) { vm.refreshMemoryStatus() }
                 MemoryScreen(
                     memories = memories,
+                    personas = assistants,
+                    initialPersonaId = settings.activeAssistantId,
+                    queueStatus = memoryQueueStatus,
+                    onRetry = vm::retryMemory,
                     memoryEnabled = settings.memoryEnabled,
                     autoMemoryEnabled = settings.autoMemoryEnabled,
                     onBack = { screen = Screen.Settings },

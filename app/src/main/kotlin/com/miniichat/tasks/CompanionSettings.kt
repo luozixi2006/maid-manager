@@ -20,6 +20,7 @@ fun CompanionSettings(refresh: Int, openPermission: () -> Unit, onError: (String
     val context = LocalContext.current
     val running by CompanionRuntime.running.collectAsState()
     var avatar by remember(refresh) { mutableStateOf(CompanionAppearance.avatar(context)) }
+    var workAvatar by remember(refresh) { mutableStateOf(CompanionAppearance.workAvatar(context)) }
     var defaultAvatar by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("陪伴") }
     var popups by remember { mutableStateOf(CompanionAppearance.popups(context)) }
@@ -32,6 +33,9 @@ fun CompanionSettings(refresh: Int, openPermission: () -> Unit, onError: (String
     val photos = rememberPhotoActions("companion-avatar", 1, {
         it.firstOrNull()?.let { path -> CompanionAppearance.setAvatar(context, path); avatar = path }
     }, onError)
+    val workPhotos = rememberPhotoActions("work-companion-avatar",1, {
+        it.firstOrNull()?.let { path -> CompanionAppearance.setWorkAvatar(context,path); workAvatar=path }
+    },onError)
     SectionHeading("屏幕陪伴")
     Text("在其他应用上也能和她聊天、收消息，或交代一件事。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     TextButton(onPersona) { Text("到当前人设设置主动问候") }
@@ -40,7 +44,7 @@ fun CompanionSettings(refresh: Int, openPermission: () -> Unit, onError: (String
             PersonAvatar(name, avatar.ifBlank { defaultAvatar }, 64.dp)
             Column(Modifier.padding(start = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(name, style = MaterialTheme.typography.titleLarge)
-                Text(if (avatar.isBlank()) "跟随当前对话头像" else "独立陪伴头像", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (avatar.isBlank()) "聊天 · 跟随当前人设" else "聊天 · 自定义头像", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row {
                     TextButton(photos.choose, enabled = !photos.busy, contentPadding = PaddingValues(end = 14.dp)) { Text(if (photos.busy) "保存中…" else "更换头像") }
                     if (avatar.isNotBlank()) TextButton({ CompanionAppearance.setAvatar(context, ""); avatar = "" }, contentPadding = PaddingValues(0.dp)) { Text("还原") }
@@ -48,6 +52,17 @@ fun CompanionSettings(refresh: Int, openPermission: () -> Unit, onError: (String
             }
         }
         HorizontalDivider(Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+        Row(Modifier.fillMaxWidth().padding(20.dp),verticalAlignment=Alignment.CenterVertically) {
+            PersonAvatar("工作",workAvatar.ifBlank { defaultAvatar },48.dp)
+            Column(Modifier.padding(start=16.dp)) {
+                Text("工作悬浮窗",style=MaterialTheme.typography.titleSmall)
+                Text(if(workAvatar.isBlank())"跟随任务人设" else "自定义工作头像",style=MaterialTheme.typography.bodySmall)
+                Row {
+                    TextButton(workPhotos.choose,enabled=!workPhotos.busy){Text("更换工作头像")}
+                    if(workAvatar.isNotBlank())TextButton({CompanionAppearance.setWorkAvatar(context,"");workAvatar=""}){Text("还原")}
+                }
+            }
+        }
         PreferenceRow("显示悬浮头像", if (running) "已开启" else "已关闭") {
             AppSwitch(running, { enabled ->
                 if (!enabled) context.stopService(Intent(context, PetOverlayService::class.java))

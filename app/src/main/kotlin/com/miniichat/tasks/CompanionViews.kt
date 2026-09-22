@@ -9,6 +9,8 @@ import android.graphics.drawable.RippleDrawable
 import android.content.res.ColorStateList
 import android.view.Gravity
 import android.view.View
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.widget.*
 
 /** Native overlay uses the same neutral surfaces and blue accent as Compose. */
@@ -64,6 +66,19 @@ internal class CompanionViews(val context: Context, dark: Boolean) {
         layoutParams = LinearLayout.LayoutParams(dp(38), dp(38))
         contentDescription = description; isFocusable = true; setOnClickListener { click() }
         background = RippleDrawable(ColorStateList.valueOf(0x22000000), shape(Color.TRANSPARENT, 19), null)
+        // Window replacement can remove View's deferred PerformClick callback. Commit a completed
+        // tap synchronously, through performClick so accessibility still gets the standard event.
+        var startX=0f;var startY=0f;var tap=false
+        val slop=ViewConfiguration.get(context).scaledTouchSlop
+        setOnTouchListener { target,event ->
+            when(event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {startX=event.x;startY=event.y;tap=true;target.isPressed=true}
+                MotionEvent.ACTION_MOVE -> if(kotlin.math.abs(event.x-startX)>slop || kotlin.math.abs(event.y-startY)>slop){tap=false;target.isPressed=false}
+                MotionEvent.ACTION_UP -> {target.isPressed=false;if(tap && event.x>=0 && event.x<target.width && event.y>=0 && event.y<target.height)target.performClick();tap=false}
+                MotionEvent.ACTION_CANCEL -> {tap=false;target.isPressed=false}
+            }
+            true
+        }
     }
     fun header(name: String, state: String, path: String, collapse: () -> Unit, close: () -> Unit, drag: (View) -> Unit): LinearLayout = row().apply {
         contentDescription = "拖动窗口标题栏"; drag(this)
@@ -73,7 +88,7 @@ internal class CompanionViews(val context: Context, dark: Boolean) {
             addView(label(name, 16).apply { setTypeface(typeface, Typeface.BOLD); maxLines = 1 })
             addView(label(state, 12, true).apply { setPadding(0, dp(5), 0, 0) })
         }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(12) })
-        addView(icon("−", "收起陪伴", collapse)); addView(icon("×", "关闭陪伴", close))
+        addView(icon("−", "收起陪伴", collapse).apply { tag = "collapse" }); addView(icon("×", "关闭陪伴", close))
     }
     fun scroll(content: View, maxHeight: Int): ScrollView = object : ScrollView(context) {
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {

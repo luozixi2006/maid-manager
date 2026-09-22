@@ -500,6 +500,13 @@ private fun UserBubble(
                     }
                 }
             }
+            val sentAt = formatMessageTime(message.createdAt)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                sentAt,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             GeneratedAttachmentGallery(
                 attachments = message.attachments,
                 onSave = onSaveImage,
@@ -545,6 +552,12 @@ private fun AssistantRow(
                     fontSize = 14.sp
                 ),
                 color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                formatMessageTime(message.createdAt),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         Spacer(Modifier.height(8.dp))

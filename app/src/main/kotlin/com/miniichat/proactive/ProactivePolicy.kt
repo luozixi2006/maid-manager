@@ -7,6 +7,12 @@ import kotlin.math.roundToLong
 object ProactivePolicy {
     const val GLOBAL_THROTTLE_MILLIS = 15L * 60L * 1000L
     const val RECENT_USER_ACTIVITY_MILLIS = 30L * 60L * 1000L
+    const val UNANSWERED_COOLDOWN_MILLIS = 24L * 60L * 60L * 1000L
+    fun shouldWait(lastRole:String?,lastAt:Long,lastProactive:Boolean,now:Long):Boolean {
+        if(lastRole==null)return false
+        val age=(now-lastAt).coerceAtLeast(0)
+        return age<RECENT_USER_ACTIVITY_MILLIS || (lastRole=="assistant" && lastProactive && age<UNANSWERED_COOLDOWN_MILLIS)
+    }
     fun initialDelayMillis(randomUnit: Double) = ((5 + 10 * randomUnit.coerceIn(0.0, 1.0)) * 60_000).roundToLong()
     fun personaDelay(assistant: com.miniichat.data.Assistant, random: Double, tendency: Double? = null, failure: Int = 0): Long {
         if (assistant.proactiveTiming == "persona") return nextDelayMillis("persona", random, tendency, failure)

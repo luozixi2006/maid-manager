@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "MaidManager"
 include(":app")
+include(":companion-core", ":watch")

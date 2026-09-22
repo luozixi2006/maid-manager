@@ -83,10 +83,11 @@ class ConversationHandoffGenerator(private val client: LlmClient) {
         }
         onProgress("正在合并交接信息")
         val merged = mergeHierarchically(extractions, provider, modelId, policy)
-        val localPreferences = memories.filter {
+        val selectedMemories = selectHandoffMemories(memories, conversation.assistantId)
+        val localPreferences = selectedMemories.filter {
             it.enabled && it.category in setOf("偏好", "聊天偏好", "用户信息")
         }.map { it.content }
-        val localMemories = memories.filter { it.enabled }.map {
+        val localMemories = selectedMemories.map {
             HandoffMemory(it.content, importance = 0.9, category = it.category)
         }
         val importantMemories = (localMemories + merged.importantMemories)
@@ -225,3 +226,12 @@ private fun List<String>.cleanDistinct(): List<String> = asSequence()
     .filter(String::isNotBlank)
     .distinctBy(String::lowercase)
     .toList()
+
+/**
+ * Handoff context may only carry memories owned by the conversation persona.
+ * Legacy unassigned (blank personaId) and other personas' memories stay private.
+ */
+fun selectHandoffMemories(memories: List<LongTermMemory>, assistantId: String): List<LongTermMemory> {
+    if (assistantId.isBlank()) return emptyList()
+    return memories.filter { it.enabled && it.status == "active" && it.personaId == assistantId }
+}

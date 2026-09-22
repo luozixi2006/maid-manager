@@ -44,7 +44,27 @@ object ChatDataCodec {
             },
             personas = personas,
             memories = memories.map {
-                ArchiveMemory(it.id, it.content, it.category, it.createdAt, it.updatedAt, it.enabled)
+                ArchiveMemory(
+                    id = it.id,
+                    content = it.content,
+                    category = it.category,
+                    createdAt = it.createdAt,
+                    updatedAt = it.updatedAt,
+                    enabled = it.enabled,
+                    personaId = it.personaId,
+                    importance = it.importance,
+                    confidence = it.confidence,
+                    lastConfirmedAt = it.lastConfirmedAt,
+                    lastUsedAt = it.lastUsedAt,
+                    sources = it.sources,
+                    stable = it.stable,
+                    embedding = it.embedding,
+                    embeddingModel = it.embeddingModel,
+                    status = it.status,
+                    supersedes = it.supersedes,
+                    revision = it.revision,
+                    origin = it.origin
+                )
             }
         )
     )
@@ -92,8 +112,27 @@ object ChatDataCodec {
         var importedMemories = 0
         archive.memories.forEach { incoming ->
             val memory = LongTermMemory(
-                incoming.id, incoming.content, incoming.category,
-                incoming.createdAt, incoming.updatedAt, incoming.enabled
+                id = incoming.id,
+                content = incoming.content,
+                category = incoming.category,
+                createdAt = incoming.createdAt,
+                updatedAt = incoming.updatedAt,
+                enabled = incoming.enabled,
+                // Blank stays unassigned; never fan legacy memories out to every persona.
+                personaId = if (incoming.personaId.isBlank()) ""
+                else personaMap[incoming.personaId] ?: incoming.personaId,
+                importance = incoming.importance,
+                confidence = incoming.confidence,
+                lastConfirmedAt = incoming.lastConfirmedAt,
+                lastUsedAt = incoming.lastUsedAt,
+                sources = incoming.sources,
+                stable = incoming.stable,
+                embedding = incoming.embedding,
+                embeddingModel = incoming.embeddingModel,
+                status = incoming.status,
+                supersedes = incoming.supersedes,
+                revision = incoming.revision,
+                origin = incoming.origin
             )
             val existing = mergedMemories.firstOrNull { it.id == memory.id }
             when {

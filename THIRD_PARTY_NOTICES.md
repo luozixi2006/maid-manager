@@ -33,4 +33,12 @@ Ktor 的 Android HTTP 实现会传递使用 OkHttp；OkHttp 采用 Apache-2.0。
 
 ## 图标与素材
 
+### 本地记忆检索
+
+- BAAI / FlagEmbedding `bge-small-zh-v1.5`，MIT，固定版本 `7999e1d3359715c523056ef9478215996d62a620`。
+- 模型来源：https://huggingface.co/BAAI/bge-small-zh-v1.5 。官方权重在本地转换为 ONNX MatMul INT8，不使用第三方未知权重。
+- ONNX Runtime Android 1.20.0，MIT，Copyright (c) Microsoft Corporation。
+- 完整许可证随 APK 位于 `assets/memory/THIRD_PARTY_LICENSES.txt`；转换脚本为 `tools/export_memory_model.py`，哈希与验证数据在同目录 `provenance.json`。
+- 只有手机 APK 携带约 57 MB 模型。向量化本地进行，不发送给额外的向量服务；抽取事实及生成回复仍使用用户选定的模型服务。
+
 Launcher 图片由当前项目维护者提供。除非权利人另行授权，该图片不因放入本仓库而自动适用 MIT License。公开发布或允许再分发前，应由项目维护者确认其版权和肖像使用权限。

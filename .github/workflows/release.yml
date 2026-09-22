@@ -38,10 +38,15 @@ jobs:
       - name: Prepare the existing app signing key
         env:
           ANDROID_UPGRADE_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPGRADE_KEYSTORE_BASE64 }}
+          ANDROID_WATCH_KEYSTORE_BASE64: ${{ secrets.ANDROID_WATCH_KEYSTORE_BASE64 }}
         run: |
           test -n "$ANDROID_UPGRADE_KEYSTORE_BASE64"
           printf '%s' "$ANDROID_UPGRADE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/maid-manager.keystore"
           test -s "$RUNNER_TEMP/maid-manager.keystore"
+          if test -n "$ANDROID_WATCH_KEYSTORE_BASE64"; then
+            printf '%s' "$ANDROID_WATCH_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/maid-watch.keystore"
+            test -s "$RUNNER_TEMP/maid-watch.keystore"
+          fi
 
       - name: Test and build signed update APK
         env:
@@ -49,12 +54,15 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_UPGRADE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_UPGRADE_KEY_PASSWORD }}
           RELEASE_STORE_FILE: ${{ runner.temp }}/maid-manager.keystore
+          WATCH_STORE_FILE: ${{ runner.temp }}/maid-watch.keystore
         run: |
           test -n "$RELEASE_STORE_PASSWORD"
           test -n "$RELEASE_KEY_ALIAS"
           test -n "$RELEASE_KEY_PASSWORD"
           chmod +x ./gradlew
-          ./gradlew :app:testDebugUnitTest :app:assembleRelease --no-daemon \
+          WATCH_TASK=:watch:assembleDebug
+          if test -s "$WATCH_STORE_FILE"; then WATCH_TASK=:watch:assembleRelease; fi
+          ./gradlew :app:testDebugUnitTest :companion-core:testDebugUnitTest :watch:testDebugUnitTest :app:assembleRelease "$WATCH_TASK" --no-daemon \
             -PBUILD_VERSION_CODE="$BUILD_VERSION_CODE" \
             -PBUILD_VERSION_NAME="$BUILD_VERSION_NAME" \
             -PUPDATE_GITHUB_OWNER="${GITHUB_REPOSITORY_OWNER}" \
@@ -85,6 +93,15 @@ jobs:
           BADGING="$("$AAPT" dump badging "$RUNNER_TEMP/$APK_NAME")"
           printf '%s\n' "$BADGING" | grep -F "package: name='com.maidmanager.debug' versionCode='${BUILD_VERSION_CODE}'"
           printf '%s\n' "$BADGING" | grep -F "versionName='${BUILD_VERSION_NAME}'"
+          printf '%s\n' "$BADGING" | grep -F "launchable-activity: name='com.miniichat.MainActivity'"
+          WATCH_NAME=""
+          if test -s "$RUNNER_TEMP/maid-watch.keystore"; then
+            WATCH_NAME="maid-manager-watch-${BUILD_VERSION_NAME}-release.apk"
+            cp "watch/build/outputs/apk/release/$WATCH_NAME" "$RUNNER_TEMP/$WATCH_NAME"
+            WATCH_REPORT="$("$APKSIGNER" verify --verbose --print-certs "$RUNNER_TEMP/$WATCH_NAME")"
+            printf '%s\n' "$WATCH_REPORT" | grep -F "d1ae2e2d40f963a379b30263498f9092362c40d372825c7db1a5b1c02e2d0164"
+            "$AAPT" dump badging "$RUNNER_TEMP/$WATCH_NAME" | grep -F "launchable-activity: name='com.miniichat.watch.WatchActivity'"
+          fi
           SHA256="$(sha256sum "$RUNNER_TEMP/$APK_NAME" | cut -d' ' -f1)"
           TAG="v${BUILD_VERSION_NAME}"
           APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${APK_NAME}"
@@ -102,14 +119,16 @@ jobs:
             "$RUNNER_TEMP/update-manifest.json"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "apk_name=$APK_NAME" >> "$GITHUB_OUTPUT"
+          echo "watch_name=$WATCH_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          FILES=("$RUNNER_TEMP/${{ steps.package.outputs.apk_name }}" "$RUNNER_TEMP/update-manifest.json")
+          if test -n "${{ steps.package.outputs.watch_name }}"; then FILES+=("$RUNNER_TEMP/${{ steps.package.outputs.watch_name }}"); fi
           gh release create "${{ steps.package.outputs.tag }}" \
-            "$RUNNER_TEMP/${{ steps.package.outputs.apk_name }}" \
-            "$RUNNER_TEMP/update-manifest.json" \
+            "${FILES[@]}" \
             --target "$GITHUB_SHA" \
             --title "女仆管理器 ${BUILD_VERSION_NAME}" \
             --notes "$RELEASE_NOTES"

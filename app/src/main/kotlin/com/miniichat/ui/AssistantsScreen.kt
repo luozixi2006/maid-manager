@@ -261,6 +261,7 @@ private fun PersonaEditorDialog(
                 }
                 Text("依照人设和最近聊天来问候、分享话题，不用配置任务规则。开启后会按需调用当前模型；未回复时不连发。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (proactiveEnabled) {
+                    if(initial!=null) Text(com.miniichat.proactive.ProactiveDiagnostics.describe(context,initial.id),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     Row { listOf("persona" to "随人设", "fixed" to "固定间隔", "random" to "随机间隔").forEach { (key, label) ->
                         TextButton({ timing = key }) { Text(if (timing == key) "✓ $label" else label) }
                     } }

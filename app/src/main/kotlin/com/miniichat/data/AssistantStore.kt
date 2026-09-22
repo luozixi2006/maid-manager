@@ -36,13 +36,21 @@ class AssistantStore(private val context: Context) {
     }
 
     suspend fun upsert(a: Assistant) {
-        val cur = snapshot().toMutableList()
-        val idx = cur.indexOfFirst { it.id == a.id }
-        if (idx >= 0) cur[idx] = a else cur.add(a)
-        save(cur)
+        transformAll { list -> if (list.any { it.id == a.id }) list.map { if (it.id == a.id) a else it } else list + a }
+    }
+
+    suspend fun update(id: String, transform: (Assistant) -> Assistant) =
+        transformAll { list -> list.map { if (it.id == id) transform(it) else it } }
+
+    suspend fun transformAll(transform: (List<Assistant>) -> List<Assistant>) {
+        context.assistantsDataStore.edit { prefs ->
+            val current = prefs[key]?.let { json.decodeFromString(ListSerializer(Assistant.serializer()), it) }
+                ?: AssistantPresets.defaults()
+            prefs[key] = json.encodeToString(ListSerializer(Assistant.serializer()), transform(current))
+        }
     }
 
     suspend fun delete(id: String) {
-        save(snapshot().filterNot { it.id == id })
+        transformAll { it.filterNot { assistant -> assistant.id == id } }
     }
 }

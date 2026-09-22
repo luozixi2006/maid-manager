@@ -1,0 +1,15 @@
+{
+  "source": "BAAI/bge-small-zh-v1.5",
+  "revision": "7999e1d3359715c523056ef9478215996d62a620",
+  "license": "MIT",
+  "pooling": "CLS + L2 normalize",
+  "quantization": "ONNX Runtime dynamic MatMul int8",
+  "max_tokens": 256,
+  "sha256": "cbf2a7597465573f5316bb44be0929cc4cb5aadaadf4c612d7eb9e6edc9a6ae7",
+  "bytes": 57160953,
+  "validation": {
+    "drink_related": 0.47923004627227783,
+    "drink_unrelated": 0.2660442590713501,
+    "project_related": 0.6456844806671143
+  }
+}

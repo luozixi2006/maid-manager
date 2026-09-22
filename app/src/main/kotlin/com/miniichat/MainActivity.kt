@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         AppVisibility.isForeground = true
+        com.miniichat.watchlink.PhoneLink.startIfEnabled(this)
     }
 
     override fun onStop() {

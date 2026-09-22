@@ -59,10 +59,14 @@ class PetOverlayService : Service() {
     private var draft = ""
     private var dark = false
     private var destroyed = false
+    private var rendering = false
+    private var renderAgain = false
+    private var touching = false
+    private var personas = emptyList<Assistant>()
     private var themeMode = "system"
     private val lookListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == WorkDefaults.ROUTINE) pendingRoutine = WorkDefaults.routine(this)
-        if (key == CompanionAppearance.AVATAR || key == CompanionAppearance.POPUPS || key == WorkDefaults.ROUTINE) serviceScope.launch { render() }
+        if (key == CompanionAppearance.AVATAR || key == CompanionAppearance.WORK_AVATAR || key == CompanionAppearance.POPUPS || key == WorkDefaults.ROUTINE) serviceScope.launch { render() }
     }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onCreate() {
@@ -99,6 +103,7 @@ class PetOverlayService : Service() {
             render()
             launch { captureHidden.collect { hidden -> view?.visibility = if (hidden) View.INVISIBLE else View.VISIBLE } }
             launch { ScreenShare.running.collect { render() } }
+            launch { com.miniichat.watchlink.PhoneLink.presence.collect { render() } }
             launch { ScreenCompanion.enabled.collect { observing ->
                 val pause = PendingIntent.getService(this@PetOverlayService, 43, Intent(this@PetOverlayService, PetOverlayService::class.java).setAction("pause_screen"), PendingIntent.FLAG_IMMUTABLE)
                 val notice = NotificationCompat.Builder(this@PetOverlayService, channel).setSmallIcon(android.R.drawable.ic_menu_info_details)
@@ -113,6 +118,7 @@ class PetOverlayService : Service() {
                 combine(SettingsRepository(this@PetOverlayService).settings, AssistantStore(this@PetOverlayService).assistantsFlow,
                     ConversationStore(this@PetOverlayService).conversationsFlow) { settings, assistants, chats -> Triple(settings, assistants, chats) }
                     .collect { (latest, assistants, chats) ->
+                        personas = assistants
                         themeMode = latest.themeMode
                         dark = themeMode == "dark" || (themeMode == "system" && resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES)
                         if (activePersona != latest.activeAssistantId) { activePersona = latest.activeAssistantId; conversationId = ""; quickReply = "" }
@@ -160,16 +166,48 @@ class PetOverlayService : Service() {
     }
     private fun render() {
         if (destroyed) return
+        // Flow callbacks and focus/layout events can re-enter while replacing the window.
+        if (rendering || touching) { renderAgain = true; return }
+        rendering = true
+        try { renderWindow() } finally {
+            rendering = false
+            if (renderAgain) { renderAgain = false; serviceScope.launch { render() } }
+        }
+    }
+    private fun collapse() {
+        expanded = false; shortcut = false
+        view?.findViewWithTag<EditText>("draft")?.let { input ->
+            draft = input.text.toString(); input.clearFocus()
+            (getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(input.windowToken,0)
+        }
+        PetMessages.notice.value = ""
+        render()
+    }
+    private fun renderWindow() {
         if (!::wm.isInitialized || !Settings.canDrawOverlays(this)) { stopSelf(); return }
         val old = view
         val focused = old?.findViewWithTag<EditText>("draft")?.hasFocus() == true
         val previousHeight = params.height
         old?.findViewWithTag<EditText>("draft")?.let { draft = it.text.toString() }
         val ui = CompanionViews(this, dark)
-        val panel = ui.column().apply { setPadding(dp(if (expanded) 12 else 6), dp(if (expanded) 12 else 6), dp(if (expanded) 12 else 6), dp(if (expanded) 12 else 6)) }
-        val path = CompanionAppearance.resolve(CompanionAppearance.avatar(this), if (workMode) task?.avatarPath else null, avatar)
-        val title = if (workMode) task?.characterName ?: name else name
-        val state = if (chatting) "正在回复" else if (workMode) task?.statusLabel ?: "可以交代一件事" else if (ScreenShare.running.value) "画面共享中" else if (ScreenCompanion.enabled.value) "文字感知已开启" else if (PetMessages.notice.value.isNotBlank()) "有话想和你说" else "陪着你"
+        // Keep the same window from DOWN through UP, including while background flows update.
+        // Replacing it mid-gesture loses the collapse click on a busy conversation.
+        val panel = object : LinearLayout(this) {
+            override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                if(event.actionMasked==MotionEvent.ACTION_DOWN) touching=true
+                return try { super.dispatchTouchEvent(event) } finally {
+                    if(event.actionMasked==MotionEvent.ACTION_UP || event.actionMasked==MotionEvent.ACTION_CANCEL) {
+                        touching=false
+                        // View posts its click after ACTION_UP. Let that click run before replacement.
+                        if(renderAgain){renderAgain=false;android.os.Handler(android.os.Looper.getMainLooper()).post{render()}}
+                    }
+                }
+            }
+        }.apply { orientation=LinearLayout.VERTICAL;setPadding(dp(if (expanded) 12 else 6), dp(if (expanded) 12 else 6), dp(if (expanded) 12 else 6), dp(if (expanded) 12 else 6)) }
+        val taskPersona = personas.firstOrNull { it.id==task?.personaId }
+        val path = CompanionAppearance.resolveForMode(workMode,CompanionAppearance.avatar(this),CompanionAppearance.workAvatar(this),taskPersona?.avatarPath ?: task?.avatarPath,avatar)
+        val title = if (workMode) taskPersona?.displayName ?: task?.characterName ?: name else name
+        val state = if (chatting) "正在回复" else if (workMode) task?.statusLabel ?: "可以交代一件事" else if (ScreenShare.running.value) "画面共享中" else if (ScreenCompanion.enabled.value) "文字感知已开启" else if (PetMessages.notice.value.isNotBlank()) "有话想和你说" else when(com.miniichat.watchlink.PhoneLink.presence.value) { "awake" -> "留意到了"; "talking" -> "想和你说话"; "sleeping" -> "安静陪伴"; else -> "陪着你" }
         if (!expanded) {
             val bubble = FrameLayout(this)
             val photo = ui.avatar(path, 52, title).apply { contentDescription = title + "，" + state + "，点按展开，长按菜单" }
@@ -184,7 +222,7 @@ class PetOverlayService : Service() {
             attachDrag(grip, false)
             panel.addView(grip, LinearLayout.LayoutParams(-1, dp(24)))
             panel.addView(ui.header(title, state, path,
-                { expanded = false; shortcut = false; PetMessages.notice.value = ""; render() }, { stopSelf() }, { attachDrag(it, false) }))
+                { collapse() }, { stopSelf() }, { attachDrag(it, false) }))
             val tabs = ui.row().apply { gravity = Gravity.TOP }
             listOf("聊天", "工作").forEachIndexed { i, label ->
                 tabs.addView(ui.action(label, (i == 1) == workMode) { workMode = i == 1; shortcut = false; quickReply = ""; render() },
@@ -252,7 +290,7 @@ class PetOverlayService : Service() {
                 val messages = conversation?.messages.orEmpty().takeLast(30)
                 if (messages.isEmpty()) body.addView(ui.label(PetMessages.notice.value.ifBlank { "我在，想聊点什么？" }))
                 messages.forEach { message ->
-                    body.addView(ui.label(if (message.role == "user") "你" else name, 11, true).apply { setPadding(0, dp(8), 0, dp(4)) })
+                    body.addView(ui.label((if (message.role == "user") "你" else name)+" · "+com.miniichat.ui.formatMessageTime(message.createdAt), 11, true).apply { setPadding(0, dp(8), 0, dp(4)) })
                     body.addView(ui.label(message.content.ifBlank { "[图片消息，请在应用内查看]" }).apply {
                         background = ui.shape(ui.inset, 14); setPadding(dp(12), dp(10), dp(12), dp(10)); setTextIsSelectable(true)
                     })
@@ -267,7 +305,8 @@ class PetOverlayService : Service() {
             if (quickReply.isNotBlank()) body.addView(ui.label(quickReply, 13, true).apply { setPadding(0, dp(8), 0, dp(8)) })
             val scroll = ScrollView(this).apply { addView(body); isFillViewport = false; isVerticalScrollBarEnabled = true }
             panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(6) })
-            if (!workMode) scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+            // fullScroll() also moves keyboard focus; don't focus the input just to scroll.
+            if (!workMode) scroll.post { if(view === panel && expanded) scroll.scrollTo(0,body.height) }
             val footer = ui.row()
             val input = EditText(this).apply {
                 tag = "draft"; hint = if (workMode) "交代事情，或回答当前问题…" else "和" + name + "说句话…"
@@ -313,7 +352,7 @@ class PetOverlayService : Service() {
                 insets
             }
         }
-        if (old != null) runCatching { wm.removeView(old) }
+        if (old != null) runCatching { wm.removeViewImmediate(old) }
         view = panel
         panel.visibility = if (captureHidden.value) View.INVISIBLE else View.VISIBLE
         params.width = if (expanded) OverlaySizing.fit(dp(TaskActions.preferences(this).getInt("pet_width", 360)), dp(280), resources.displayMetrics.widthPixels - dp(24)) else dp(64)

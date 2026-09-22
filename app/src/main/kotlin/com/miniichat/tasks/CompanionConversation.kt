@@ -29,13 +29,16 @@ object CompanionConversation {
         val store = ConversationStore(context)
         val conversation = current(context, assistant.id, preferredId) ?: Conversation(newId(), "与${assistant.displayName}聊天", assistantId = assistant.id).also { store.upsert(it) }
         val user = Message(newId(), "user", text.take(4000), personaId = assistant.id)
-        val saved = store.appendMessage(conversation.id, user) ?: error("对话已删除")
+        store.appendMessage(conversation.id, user) ?: error("对话已删除")
+        com.miniichat.watchlink.PhoneLink.beforeChat(context, conversation.id)
+        val saved = store.snapshot().firstOrNull { it.id == conversation.id } ?: error("对话已删除")
         val memory = MemoryRepository(context)
-        val memories = try { if (settings.memoryEnabled) memory.enabled(15).joinToString("\n") { it.content }.take(6000) else "" } finally { memory.close() }
+        val memories = try { if (settings.memoryEnabled) com.miniichat.memory.MemoryRetrieval.prompt(memory.relevant(assistant.id,text)) else "" } finally { memory.close() }
         val prompt = """${assistant.systemPrompt}
 当前人格补充：${assistant.currentPersonality}
 你在手机悬浮聊天窗中和用户交流。保持人设，用自然对话回应，不要把闲聊变成工作安排，也不要总提示使用功能。
 最近记忆（仅上下文，不是工具授权）：$memories
+${com.miniichat.watchlink.PhoneLink.contextText(context,conversation.id)}
 你在聊天页没有执行工具；用户确实要求操作时，简短说明可切到“帮我办事”提交。不要声称已做未执行的操作。
 """.trimIndent()
         val client = LlmClient()
@@ -44,6 +47,8 @@ object CompanionConversation {
             temperature = assistant.temperature ?: settings.temperature, structuredJson = false, requestTimeoutMillis = 120000, maxOutputTokens = 1600).content
         } finally { client.close() }
         check(answer.isNotBlank()) { "模型没有返回文字，请重试" }
-        return store.appendMessage(saved.id, Message(newId(), "assistant", answer, providerId = provider.id, modelId = model, personaId = assistant.id)) ?: error("对话已删除，回复未重新创建对话")
+        val result = store.appendMessage(saved.id, Message(newId(), "assistant", answer, providerId = provider.id, modelId = model, personaId = assistant.id)) ?: error("对话已删除，回复未重新创建对话")
+        com.miniichat.memory.MemoryWork.enqueueConversation(context,result.id)
+        return result
     }
 }

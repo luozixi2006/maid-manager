@@ -104,6 +104,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val conversations: StateFlow<List<Conversation>> = store.conversationsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val memories: StateFlow<List<LongTermMemory>> = memoryRepository.memories
+    val memoryQueueStatus = MutableStateFlow("")
     val ttsState: StateFlow<TtsPlaybackState> = ttsManager.state
     val searchSources = searchSourceStore.sourcesFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, SearchSourceStore.defaultSources())
@@ -133,7 +134,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch { store.recoverInterruptedMessages(startupCutoff) }
-        viewModelScope.launch { memoryRepository.refresh() }
+        viewModelScope.launch { com.miniichat.memory.MemoryChanges.version.collect { memoryRepository.refresh();refreshMemoryStatus() } }
+        com.miniichat.memory.MemoryWork.schedule(app)
         viewModelScope.launch {
             val current = settingsRepo.settings.first()
             searchSourceStore.migrateLegacy(
@@ -381,13 +383,22 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun setReasoningEnabled(enabled: Boolean) = updateSettings { it.copy(reasoningEnabled = enabled) }
     fun setReasoningEffort(effort: String) = updateSettings { it.copy(reasoningEffort = effort) }
 
-    fun upsertMemory(memory: LongTermMemory) {
-        viewModelScope.launch { memoryRepository.upsert(memory) }
+    suspend fun upsertMemory(memory: LongTermMemory) {
+        require(memory.personaId.isNotBlank()) { "请先选择记忆所属人设" }
+        require(assistantStore.snapshot().any { it.id == memory.personaId }) { "这个人设已不存在" }
+        memoryRepository.upsert(memory.copy(revision = memory.revision + 1, origin = "manual"))
     }
 
     fun deleteMemory(id: String) {
         viewModelScope.launch { memoryRepository.delete(id) }
     }
+    fun refreshMemoryStatus() { viewModelScope.launch(Dispatchers.IO) {
+        com.miniichat.memory.MemoryDatabase(getApplication()).use { memoryQueueStatus.value = it.queueStatus() }
+    } }
+    fun retryMemory() { viewModelScope.launch(Dispatchers.IO) {
+        com.miniichat.memory.MemoryDatabase(getApplication()).use { it.retryFailures() }
+        com.miniichat.memory.MemoryWork.schedule(getApplication());refreshMemoryStatus()
+    } }
 
     fun setMemoryEnabled(id: String, enabled: Boolean) {
         viewModelScope.launch { memoryRepository.setEnabled(id, enabled) }
@@ -646,6 +657,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val requestJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
           try {
             val activeId = _activeId.value ?: newId().also { _activeId.value = it }
+            com.miniichat.watchlink.PhoneLink.beforeChat(getApplication(), activeId)
             val title = trimmed.take(30).replace("\n", " ").ifBlank { "照片对话" }
             val personaId = assistant?.id ?: current.activeAssistantId
             val userMessage = Message(
@@ -703,7 +715,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     }
 
                     if (current.memoryEnabled) {
-                        val enabledMemories = memoryRepository.enabled(50)
+                        val enabledMemories = memoryRepository.relevant(updated.assistantId, trimmed)
                         if (enabledMemories.isNotEmpty()) {
                             supportingMessages += ChatMessage("system", formatMemories(enabledMemories))
                         }
@@ -779,6 +791,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                     add(ChatMessage("system", renderedSystem))
                                 }
                                 addAll(supportingMessages)
+                                if (com.miniichat.companion.LinkConfig(getApplication()).conversationId == activeId) {
+                                    val live = com.miniichat.watchlink.PhoneLink.contextText(getApplication(),activeId)
+                                    if (live.isNotBlank()) add(ChatMessage("system", live))
+                                }
                                 assistant?.conversationName?.trim()?.takeIf { it.isNotBlank() }?.let { name ->
                                     add(ChatMessage("system", "用户为你设置的对话名字是「$name」，在当前对话中使用这个名字。"))
                                 }
@@ -924,12 +940,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             )
                         }
                         if (current.memoryEnabled && current.autoMemoryEnabled) {
-                            scheduleMemoryExtraction(
-                                trimmed,
-                                answer.toString(),
-                                usedRoute.provider,
-                                usedRoute.modelId
-                            )
+                            com.miniichat.memory.MemoryWork.enqueueConversation(getApplication(), activeId)
                         }
                     }
                 }
@@ -962,10 +973,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         return true
     }
 
-    private fun formatMemories(memories: List<LongTermMemory>): String = buildString {
-        appendLine("以下内容是关于用户的长期记忆。仅在与当前问题相关时自然使用，不要主动逐条复述。")
-        memories.forEach { appendLine("- [${it.category}] ${it.content}") }
-    }.trim()
+    private fun formatMemories(memories: List<LongTermMemory>): String = com.miniichat.memory.MemoryRetrieval.prompt(memories)
 
     private suspend fun updateAssistant(
         conversationId: String,
@@ -1015,86 +1023,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         updateAssistant(conversation.id, messageId, ttsCachePath = path)
     }
 
-    private fun scheduleMemoryExtraction(
-        userText: String,
-        assistantText: String,
-        provider: ProviderConfig,
-        model: String
-    ) {
-        if (userText.length < 8 || userText.trim().lowercase() in setOf("你好", "谢谢", "hi", "hello")) return
-        viewModelScope.launch {
-            try {
-                val existing = memoryRepository.memories.value.take(30)
-                val existingText = existing.joinToString("\n") {
-                    "${it.id} | ${it.category} | ${it.content}"
-                }.ifBlank { "无" }
-                val prompt = """
-                    你是本地长期记忆筛选器。只保存稳定偏好、长期目标、重要经历、聊天偏好、长期项目或稳定事实。
-                    不保存寒暄、临时问题、一次性信息、普通知识问答和无意义内容。
-                    已有记忆：
-                    $existingText
-
-                    本轮用户：$userText
-                    本轮助手：${assistantText.take(1500)}
-
-                    只输出一个 JSON 对象，不要 Markdown。格式之一：
-                    {"action":"ADD","category":"偏好","content":"用户喜欢深烘无糖咖啡。"}
-                    {"action":"UPDATE","id":"已有记忆ID","category":"偏好","content":"更新后的内容"}
-                    {"action":"DELETE","id":"已有记忆ID"}
-                    {"action":"NONE"}
-                    category 只能是：${MemoryCategories.all.joinToString("、")}。
-                """.trimIndent()
-                val response = StringBuilder()
-                client.chatStream(
-                    provider = provider,
-                    settings = settings.value.copy(stream = false, temperature = 0.1f),
-                    modelId = model,
-                    messages = listOf(ChatMessage("user", prompt)),
-                    reasoningEnabled = false
-                ).collect { event -> event.content?.let(response::append) }
-                applyMemoryAction(response.toString())
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                // Automatic extraction is best-effort: record it without interrupting chat.
-                persistErrorSafely(
-                    AppErrorClassifier.classify(
-                        error,
-                        AppErrorContext(
-                            ErrorArea.STORAGE,
-                            ErrorOperation.EXTRACT_MEMORY,
-                            provider.baseUrl,
-                            model
-                        )
-                    )
-                )
-            }
-        }
-    }
-
-    private suspend fun applyMemoryAction(raw: String) {
-        val objectText = Regex("\\{[\\s\\S]*}").find(raw)?.value ?: return
-        val obj = runCatching { json.parseToJsonElement(objectText).jsonObject }.getOrNull() ?: return
-        val action = obj.string("action")?.uppercase() ?: return
-        val id = obj.string("id")
-        val content = obj.string("content")?.trim().orEmpty()
-        val category = obj.string("category")?.takeIf { it in MemoryCategories.all } ?: "其他"
-        val now = System.currentTimeMillis()
-        when (action) {
-            "ADD" -> if (content.isNotBlank() && memoryRepository.memories.value.none {
-                    it.content.equals(content, ignoreCase = true)
-                }) {
-                memoryRepository.upsert(LongTermMemory(newId(), content, category, now, now, true))
-            }
-            "UPDATE" -> {
-                val old = memoryRepository.memories.value.firstOrNull { it.id == id } ?: return
-                if (content.isNotBlank()) memoryRepository.upsert(
-                    old.copy(content = content, category = category, updatedAt = now)
-                )
-            }
-            "DELETE" -> if (!id.isNullOrBlank()) memoryRepository.delete(id)
-        }
-    }
 
     private fun JsonObject.string(key: String): String? =
         (this[key] as? JsonPrimitive)?.contentOrNull

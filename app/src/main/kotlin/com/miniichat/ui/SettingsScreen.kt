@@ -91,6 +91,10 @@ fun SettingsScreen(
             }
 
             SettingsSection(stringResource(R.string.section_conversation)) {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                SettingsEntry(title = "手表与感知", subtitle = "同一段聊天 · 身体状态 · 最近事件", onClick = {
+                    context.startActivity(android.content.Intent(context, com.miniichat.watchlink.WatchLinkActivity::class.java))
+                })
                 SettingsEntry(title = "任务与陪伴", subtitle = "悬浮聊天 · 帮我办事 · 事件提醒", onClick = onOpenTasks)
                 SettingsEntry(
                     title = stringResource(R.string.personas),

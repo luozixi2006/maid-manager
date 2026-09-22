@@ -2,6 +2,7 @@ package com.miniichat.chatdata
 
 import com.miniichat.data.Assistant
 import com.miniichat.data.Conversation
+import com.miniichat.memory.MemorySource
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -17,7 +18,21 @@ data class ArchiveMemory(
     val category: String,
     @SerialName("created_at") val createdAt: Long,
     @SerialName("updated_at") val updatedAt: Long,
-    val enabled: Boolean
+    val enabled: Boolean,
+    // Empty means a legacy unassigned memory, NEVER a shared/default persona.
+    @SerialName("persona_id") val personaId: String = "",
+    val importance: Double = 0.6,
+    val confidence: Double = 0.8,
+    @SerialName("last_confirmed_at") val lastConfirmedAt: Long = 0,
+    @SerialName("last_used_at") val lastUsedAt: Long = 0,
+    val sources: List<MemorySource> = emptyList(),
+    val stable: Boolean = false,
+    val embedding: List<Float> = emptyList(),
+    @SerialName("embedding_model") val embeddingModel: String = "",
+    val status: String = "active",
+    val supersedes: List<String> = emptyList(),
+    val revision: Int = 1,
+    val origin: String = "manual"
 )
 
 @Serializable

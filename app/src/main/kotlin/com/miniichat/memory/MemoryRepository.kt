@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
 class MemoryRepository(context: Context) {
+    private val appContext=context.applicationContext
     private val database = MemoryDatabase(context)
     private val _memories = MutableStateFlow<List<LongTermMemory>>(emptyList())
     val memories: StateFlow<List<LongTermMemory>> = _memories.asStateFlow()
@@ -17,7 +18,8 @@ class MemoryRepository(context: Context) {
     }
 
     suspend fun upsert(memory: LongTermMemory) = withContext(Dispatchers.IO) {
-        database.upsert(memory)
+        val embedding=LocalEmbedding.embed(appContext,memory.content)
+        database.upsert(memory.copy(embedding=embedding,embeddingModel=if(embedding.isEmpty())"" else LocalEmbedding.MODEL))
         _memories.value = database.queryAll()
     }
 
@@ -36,8 +38,14 @@ class MemoryRepository(context: Context) {
         _memories.value = database.queryAll()
     }
 
-    suspend fun enabled(limit: Int = 50): List<LongTermMemory> = withContext(Dispatchers.IO) {
-        database.queryAll().asSequence().filter { it.enabled }.take(limit).toList()
+    suspend fun enabled(personaId: String, limit: Int = 50): List<LongTermMemory> = withContext(Dispatchers.IO) {
+        require(personaId.isNotBlank())
+        database.queryAll().asSequence().filter { it.personaId == personaId && it.enabled && it.status == "active" }.take(limit).toList()
+    }
+
+    suspend fun relevant(personaId: String, query: String): List<LongTermMemory> = withContext(Dispatchers.IO) {
+        val vector=LocalEmbedding.embed(appContext,query,query=true)
+        MemoryRetrieval.select(personaId,query,database.queryAll(),queryEmbedding=vector,embeddingModel=LocalEmbedding.MODEL).also { selected -> database.touch(selected.map { it.id },System.currentTimeMillis()) }
     }
 
     fun close() = database.close()

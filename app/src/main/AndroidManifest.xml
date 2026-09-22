@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -38,6 +40,8 @@
         android:theme="@style/Theme.MaidManager"
         android:enableOnBackInvokedCallback="true">
 
+        <activity android:name="com.miniichat.watchlink.WatchLinkActivity" android:exported="false" />
+        <service android:name="com.miniichat.watchlink.PhoneLinkService" android:exported="false" android:foregroundServiceType="connectedDevice|remoteMessaging" />
         <activity android:name="com.miniichat.tasks.ScreenShareConsentActivity" android:exported="false" android:excludeFromRecents="true" />
         <service android:name="com.miniichat.tasks.ScreenShareService" android:exported="false" android:foregroundServiceType="mediaProjection" />
         <activity

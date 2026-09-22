@@ -7,11 +7,11 @@ plugins {
 
 val suppliedVersionCode = providers.gradleProperty("BUILD_VERSION_CODE").orNull
 val buildVersionCode = when {
-    suppliedVersionCode == null -> 300000011
+    suppliedVersionCode == null -> 300000012
     suppliedVersionCode.toIntOrNull()?.let { it in 1..2_100_000_000 } == true -> suppliedVersionCode.toInt()
     else -> error("BUILD_VERSION_CODE must be an integer from 1 to 2100000000")
 }
-val buildVersionName = providers.gradleProperty("BUILD_VERSION_NAME").orNull ?: "3.0.11"
+val buildVersionName = providers.gradleProperty("BUILD_VERSION_NAME").orNull ?: "3.0.12"
 require(buildVersionName.matches(Regex("[0-9A-Za-z][0-9A-Za-z._+-]{0,63}"))) {
     "BUILD_VERSION_NAME contains unsupported characters"
 }
@@ -83,7 +83,7 @@ android {
 
     splits {
         abi {
-            // The app has no ABI-specific native payload. One APK avoids update
+            // Include the supported ONNX Runtime ABIs. One universal APK avoids update
             // clients accidentally choosing an incompatible split.
             isEnable = false
         }
@@ -153,6 +153,8 @@ android {
 }
 
 dependencies {
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
+    implementation(project(":companion-core"))
     val composeBom = platform("androidx.compose:compose-bom:2024.09.02")
     implementation(composeBom)
 
