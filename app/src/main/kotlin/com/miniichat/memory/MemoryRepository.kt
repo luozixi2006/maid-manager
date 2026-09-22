@@ -44,6 +44,8 @@ class MemoryRepository(context: Context) {
     }
 
     suspend fun relevant(personaId: String, query: String): List<LongTermMemory> = withContext(Dispatchers.IO) {
+        // Legacy/imported chats can have no persona. They remain usable without borrowing memories.
+        if(personaId.isBlank())return@withContext emptyList()
         val vector=LocalEmbedding.embed(appContext,query,query=true)
         MemoryRetrieval.select(personaId,query,database.queryAll(),queryEmbedding=vector,embeddingModel=LocalEmbedding.MODEL).also { selected -> database.touch(selected.map { it.id },System.currentTimeMillis()) }
     }
