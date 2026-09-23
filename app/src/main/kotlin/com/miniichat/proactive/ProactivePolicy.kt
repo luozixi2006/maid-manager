@@ -6,12 +6,21 @@ import kotlin.math.roundToLong
 
 object ProactivePolicy {
     const val GLOBAL_THROTTLE_MILLIS = 15L * 60L * 1000L
-    const val RECENT_USER_ACTIVITY_MILLIS = 30L * 60L * 1000L
-    const val UNANSWERED_COOLDOWN_MILLIS = 24L * 60L * 60L * 1000L
+    const val RECENT_USER_ACTIVITY_MILLIS = 3L * 60L * 1000L
+    const val UNANSWERED_COOLDOWN_MILLIS = 60L * 60L * 1000L
+    fun quietUntil(lastRole:String?,lastAt:Long,lastProactive:Boolean,now:Long,
+        unansweredCooldown:Long=UNANSWERED_COOLDOWN_MILLIS):Long {
+        if(lastRole==null)return now
+        // Corrupt / far-future imported timestamps must not renew the quiet window forever.
+        if(lastAt>now+5*60_000L)return now
+        val window=if(lastRole=="assistant" && lastProactive) unansweredCooldown.coerceAtLeast(RECENT_USER_ACTIVITY_MILLIS) else RECENT_USER_ACTIVITY_MILLIS
+        return (lastAt.coerceAtMost(now)+window).coerceAtLeast(now)
+    }
+    fun unansweredCooldown(assistant:com.miniichat.data.Assistant):Long =
+        if(assistant.proactiveTiming=="persona") UNANSWERED_COOLDOWN_MILLIS else assistant.proactiveMinMinutes.coerceIn(15,1440)*60_000L
+    fun retryDelayMillis(failureCount:Int):Long = listOf(2L,5L,15L,30L)[(failureCount-1).coerceIn(0,3)]*60_000L
     fun shouldWait(lastRole:String?,lastAt:Long,lastProactive:Boolean,now:Long):Boolean {
-        if(lastRole==null)return false
-        val age=(now-lastAt).coerceAtLeast(0)
-        return age<RECENT_USER_ACTIVITY_MILLIS || (lastRole=="assistant" && lastProactive && age<UNANSWERED_COOLDOWN_MILLIS)
+        return quietUntil(lastRole,lastAt,lastProactive,now)>now
     }
     fun initialDelayMillis(randomUnit: Double) = ((5 + 10 * randomUnit.coerceIn(0.0, 1.0)) * 60_000).roundToLong()
     fun personaDelay(assistant: com.miniichat.data.Assistant, random: Double, tendency: Double? = null, failure: Int = 0): Long {

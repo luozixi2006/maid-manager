@@ -4,8 +4,8 @@ android {
     compileSdk = 34
     defaultConfig {
         applicationId="com.maidmanager.watch"; minSdk=26; targetSdk=34
-        versionCode=providers.gradleProperty("BUILD_VERSION_CODE").orNull?.toInt() ?: 300000015
-        versionName=providers.gradleProperty("BUILD_VERSION_NAME").orNull ?: "3.0.15"
+        versionCode=providers.gradleProperty("BUILD_VERSION_CODE").orNull?.toInt() ?: 300000016
+        versionName=providers.gradleProperty("BUILD_VERSION_NAME").orNull ?: "3.0.16"
     }
     signingConfigs {
         getByName("debug") {

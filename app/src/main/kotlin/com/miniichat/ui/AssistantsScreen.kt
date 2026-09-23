@@ -261,7 +261,17 @@ private fun PersonaEditorDialog(
                 }
                 Text("依照人设和最近聊天来问候、分享话题，不用配置任务规则。开启后会按需调用当前模型；未回复时不连发。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (proactiveEnabled) {
-                    if(initial!=null) Text(com.miniichat.proactive.ProactiveDiagnostics.describe(context,initial.id),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    if(initial!=null) {
+                        var diagnostic by remember(initial.id){mutableStateOf("")}
+                        androidx.compose.runtime.LaunchedEffect(initial.id) {while(true){
+                            diagnostic=kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO){
+                                val next=com.miniichat.data.AssistantStore(context).snapshot().firstOrNull{it.id==initial.id}?.nextProactiveCheckAt?:0
+                                com.miniichat.proactive.ProactiveDiagnostics.describe(context,initial.id)+(if(next>0)"\n下次自动判断："+com.miniichat.ui.formatMessageTime(next) else "")
+                            }
+                            kotlinx.coroutines.delay(2000)
+                        }}
+                        Text(diagnostic,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     Row { listOf("persona" to "随人设", "fixed" to "固定间隔", "random" to "随机间隔").forEach { (key, label) ->
                         TextButton({ timing = key }) { Text(if (timing == key) "✓ $label" else label) }
                     } }
@@ -274,12 +284,16 @@ private fun PersonaEditorDialog(
                 TextButton(enabled = initial != null && !testing, onClick = {
                     testing = true; testResult = ""
                     testScope.launch {
-                        try { testResult = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.miniichat.tasks.ScreenCompanion.test(context, initial!!.id) } }
+                        try { testResult = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.miniichat.proactive.ProactiveScheduler.testNow(context, initial!!.id) } }
                         catch (e: kotlinx.coroutines.CancellationException) { throw e }
                         catch (e: Exception) { testResult = e.message?.take(160) ?: "测试未成功，请检查模型服务" }
                         finally { testing = false }
                     }
-                }) { Text(if (testing) "正在生成问候…" else "测试一次问候（使用已保存人设）") }
+                }) { Text(if (testing) "正在提交测试…" else "测试主动消息（保存并通知）") }
+                Text("测试使用已保存的人设，立即尝试一次；自动联系仍遵守间隔与安静时段。",style=MaterialTheme.typography.bodySmall)
+                com.miniichat.proactive.ProactiveNotifications.blockedReason(context)?.let {reason->
+                    TextButton({context.startActivity(com.miniichat.proactive.ProactiveNotifications.settingsIntent(context))}){Text("$reason · 去开启")}
+                }
                 if (testResult.isNotBlank()) Text(testResult, style = MaterialTheme.typography.bodySmall)
             }
         },

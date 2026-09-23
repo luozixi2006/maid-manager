@@ -18,6 +18,18 @@ import kotlin.random.Random
 object ProactiveScheduler {
     private const val UNIQUE_WORK = "maid-manager-proactive-messages"
 
+    suspend fun testNow(context:Context,assistantId:String):String {
+        val settings=SettingsRepository(context).settings.first()
+        val assistant=AssistantStore(context).snapshot().firstOrNull{it.id==assistantId}
+        check(assistant?.canContact(settings.proactiveMessagesEnabled)==true){"请先保存并开启此人设的主动联系"}
+        val request=OneTimeWorkRequestBuilder<ProactiveMessageWorker>()
+            .setInputData(workDataOf("manual" to true,"assistant_id" to assistantId))
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
+        ProactiveDiagnostics.record(context,assistantId,"主动消息测试已排队；联网后执行，结果在此更新")
+        WorkManager.getInstance(context).enqueueUniqueWork("proactive-test-$assistantId",ExistingWorkPolicy.KEEP,request)
+        return "已提交实际后台流程；将保存一条问候并尝试通知。请查看下方诊断。"
+    }
+
     suspend fun reconcile(context: Context, appendAfterCurrent: Boolean = false) {
         val appContext = context.applicationContext
         val settings = SettingsRepository(appContext).settings.first()

@@ -51,6 +51,7 @@ class PhoneHubStore(context:Context):SQLiteOpenHelper(context,"phone_companion_h
     fun pending(channel:String):List<JSONObject> = readableDatabase.rawQuery("SELECT id,body FROM turns WHERE channel=? AND status='pending' AND attempts<5 AND next_at<=? ORDER BY CASE WHEN instr(body,'message_id')>0 THEN 0 ELSE 1 END,rowid LIMIT 3",arrayOf(channel,System.currentTimeMillis().toString())).use{c->buildList{while(c.moveToNext())add(JSONObject(c.getString(1)).put("id",c.getString(0)))}}
     fun finish(channel:String,id:String){writableDatabase.execSQL("UPDATE turns SET status='done' WHERE channel=? AND id=?",arrayOf(channel,id))}
     fun fail(channel:String,id:String){writableDatabase.execSQL("UPDATE turns SET attempts=attempts+1,next_at=? WHERE channel=? AND id=?",arrayOf(System.currentTimeMillis()+60000,channel,id))}
+    fun defer(channel:String,id:String,until:Long){writableDatabase.execSQL("UPDATE turns SET next_at=? WHERE channel=? AND id=? AND status='pending'",arrayOf(until,channel,id))}
     fun retry(channel:String){writableDatabase.execSQL("UPDATE turns SET attempts=0,next_at=0 WHERE channel=? AND status='pending'",arrayOf(channel))}
     private fun <T> transaction(action:(SQLiteDatabase)->T):T {val db=writableDatabase;db.beginTransaction();return try{action(db).also{db.setTransactionSuccessful()}}finally{db.endTransaction()}}
 }

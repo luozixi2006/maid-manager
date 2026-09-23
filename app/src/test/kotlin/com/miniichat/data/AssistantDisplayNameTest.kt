@@ -8,7 +8,9 @@ class AssistantDisplayNameTest {
     @Test fun oldPersonaUsesRemarkUntilUserSetsAName() {
         val original = Json.decodeFromString(Assistant.serializer(), """{"id":"old","name":"英语口语练习"}""")
         assertEquals("英语口语练习", original.displayName)
-        val named = original.copy(conversationName = "  Alice  ", avatarPath = "/local/photo.jpg")
+        // A wall-clock default can be omitted at encode time and change during decode.
+        // Keep this name/legacy-field test deterministic instead of racing the clock.
+        val named = original.copy(createdAt = 1L, conversationName = "  Alice  ", avatarPath = "/local/photo.jpg")
         assertEquals("Alice", named.displayName)
         assertEquals("英语口语练习", named.name)
         val restored = Json.decodeFromString(Assistant.serializer(), Json.encodeToString(Assistant.serializer(), named))

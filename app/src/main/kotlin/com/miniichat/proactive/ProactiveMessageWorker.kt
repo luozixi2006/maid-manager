@@ -27,7 +27,7 @@ import kotlinx.coroutines.sync.withLock
 
 @Serializable
 private data class ProactiveDecision(
-    val action: String = "SKIP",
+    val action: String,
     val message: String = "",
     val topic_summary: String = "",
     val reason: String = "",
@@ -47,6 +47,7 @@ class ProactiveMessageWorker(
 ) : CoroutineWorker(appContext, params) {
     private val json = Json { ignoreUnknownKeys = true }
     private val recovery get() = inputData.getBoolean("recovery", false)
+    private val manual get() = inputData.getBoolean("manual", false)
 
     override suspend fun doWork(): Result = CompanionContactGate.mutex.withLock { execute() }
     private suspend fun execute(): Result {
@@ -54,17 +55,22 @@ class ProactiveMessageWorker(
         val settings = settingsRepository.settings.first()
         val now = System.currentTimeMillis()
 
-        if (ProactivePolicy.isInDoNotDisturb(
+        if (!manual && ProactivePolicy.isInDoNotDisturb(
                 now,
                 settings.proactiveDndStartMinutes,
                 settings.proactiveDndEndMinutes
             )
         ) {
-            AssistantStore(applicationContext).snapshot().filter{it.canContact(settings.proactiveMessagesEnabled)}.forEach{ProactiveDiagnostics.record(applicationContext,it.id,"现在是安静时段，稍后再联系")}
             val afterDnd = ProactivePolicy.endOfDoNotDisturbMillis(
                 now,
                 settings.proactiveDndEndMinutes
-            ) + Random.nextLong(5L * 60_000L, 45L * 60_000L)
+            ) + 60_000L
+            AssistantStore(applicationContext).transformAll { all->all.map {
+                if(it.canContact(settings.proactiveMessagesEnabled)) {
+                    ProactiveDiagnostics.record(applicationContext,it.id,"现在是安静时段，${com.miniichat.ui.formatMessageTime(afterDnd)} 后判断")
+                    it.copy(nextProactiveCheckAt=maxOf(it.nextProactiveCheckAt,afterDnd))
+                }else it
+            } }
             if (!recovery) ProactiveScheduler.scheduleAt(
                 applicationContext,
                 afterDnd,
@@ -74,10 +80,16 @@ class ProactiveMessageWorker(
         }
 
         val throttleEndsAt = settings.lastProactiveMessageAt + ProactivePolicy.GLOBAL_THROTTLE_MILLIS
-        if (settings.lastProactiveMessageAt > 0L && now < throttleEndsAt) {
+        if (!manual && settings.lastProactiveMessageAt > 0L && now < throttleEndsAt) {
+            AssistantStore(applicationContext).transformAll {all->all.map{
+                if(it.canContact(settings.proactiveMessagesEnabled)) {
+                    ProactiveDiagnostics.record(applicationContext,it.id,"联系间隔保护，${com.miniichat.ui.formatMessageTime(throttleEndsAt)} 后继续判断")
+                    it.copy(nextProactiveCheckAt=maxOf(it.nextProactiveCheckAt,throttleEndsAt+1000L))
+                }else it
+            } }
             if (!recovery) ProactiveScheduler.scheduleAt(
                 applicationContext,
-                throttleEndsAt + Random.nextLong(5L * 60_000L, 35L * 60_000L),
+                throttleEndsAt + 1000L,
                 ExistingWorkPolicy.APPEND_OR_REPLACE
             )
             return Result.success()
@@ -86,11 +98,12 @@ class ProactiveMessageWorker(
         val assistantStore = AssistantStore(applicationContext)
         val candidates = buildList {
             assistantStore.snapshot()
-                .filter { it.canContact(settings.proactiveMessagesEnabled) && it.nextProactiveCheckAt > 0L && it.nextProactiveCheckAt <= now }
+                .filter { it.canContact(settings.proactiveMessagesEnabled) && if(manual) it.id==inputData.getString("assistant_id") else it.nextProactiveCheckAt > 0L && it.nextProactiveCheckAt <= now }
                 .forEach { add(DueCandidate.Normal(it)) }
         }
 
         if (candidates.isEmpty()) {
+            if(manual)ProactiveDiagnostics.record(applicationContext,inputData.getString("assistant_id").orEmpty(),"该人设未保存或主动联系已关闭，未发送")
             if (!recovery) ProactiveScheduler.reconcile(applicationContext, appendAfterCurrent = true)
             return Result.success()
         }
@@ -101,7 +114,7 @@ class ProactiveMessageWorker(
             is DueCandidate.Normal -> processNormal(candidate.assistant, settings, settingsRepository)
             null -> Unit
         }
-        if (!recovery) ProactiveScheduler.reconcile(applicationContext, appendAfterCurrent = true)
+        if (!recovery) ProactiveScheduler.reconcile(applicationContext, appendAfterCurrent = !manual)
         return Result.success()
     }
 
@@ -113,22 +126,25 @@ class ProactiveMessageWorker(
         val now = System.currentTimeMillis()
         val assistantStore = AssistantStore(applicationContext)
         val conversationStore = ConversationStore(applicationContext)
-        val conversation = conversationStore.snapshot()
-            .asSequence()
-            .filter { it.assistantId == assistant.id && it.messages.isNotEmpty() }
-            .maxByOrNull { it.updatedAt }
+        val conversations=conversationStore.snapshot().filter{it.assistantId==assistant.id}
+        val link=com.miniichat.companion.LinkConfig(applicationContext)
+        // Keep watch events and timer greetings in the explicitly shared conversation,
+        // including a newly paired empty chat, rather than creating a second history.
+        val conversation=conversations.firstOrNull{link.enabled && link.profile.optString("persona_id")==assistant.id && it.id==link.conversationId}
+            ?: conversations.maxByOrNull{it.updatedAt}
 
-        if (shouldWaitForUser(conversation?.messages.orEmpty().map {
-                HistoryMessage(it.role, it.content, it.createdAt, it.isProactive)
-            }, now)
-        ) {
-            ProactiveDiagnostics.record(applicationContext,assistant.id,"最近互动或未回复，暂时安静陪伴")
-            assistantStore.update(assistant.id) { it.withNext(settings, contactTendency = 0.2) }
+        val last=conversation?.messages?.lastOrNull()
+        val quietUntil=ProactivePolicy.quietUntil(last?.role,last?.createdAt?:0,last?.isProactive?:false,now,ProactivePolicy.unansweredCooldown(assistant))
+        val streaming=conversation?.messages?.any{it.deliveryStatus==com.miniichat.data.MessageDeliveryStatus.STREAMING}==true
+        if (streaming || (!manual && quietUntil>now)) {
+            val retryAt=if(streaming)now+60_000L else quietUntil+1000L
+            ProactiveDiagnostics.record(applicationContext,assistant.id,"${if(streaming) "当前对话仍在生成" else "短暂防打扰"}，${com.miniichat.ui.formatMessageTime(retryAt)} 后再判断")
+            assistantStore.update(assistant.id) { it.copy(nextProactiveCheckAt=retryAt) }
             return
         }
 
         val provider = ProviderStore(applicationContext).snapshot().firstOrNull {
-            it.id == (assistant.preferredProviderId ?: settings.activeProviderId)
+            it.enabled && it.id == (assistant.preferredProviderId ?: settings.activeProviderId)
         }
         val modelId = assistant.preferredModel?.takeIf { it.isNotBlank() } ?: settings.activeModel
         if (provider == null || provider.baseUrl.isBlank() || modelId.isBlank()) {
@@ -140,15 +156,24 @@ class ProactiveMessageWorker(
         val diagnosticProvider = safeProviderHost(provider.baseUrl) ?: "unknown-provider"
         val diagnosticModel = PrivacySanitizer.safeIdentifier(modelId) ?: "unknown-model"
 
-        val memoryRepository = MemoryRepository(applicationContext)
+        var memoryRepository:MemoryRepository?=null
         try {
-            val memories = if (settings.memoryEnabled) com.miniichat.memory.MemoryRetrieval.prompt(memoryRepository.relevant(assistant.id,conversation?.messages.orEmpty().takeLast(8).joinToString { it.content })) else ""
+            ProactiveDiagnostics.record(applicationContext,assistant.id,"${if(manual) "测试" else "后台"}正在结合人设与最近记录判断是否联系")
+            val memories = if (settings.memoryEnabled) try {
+                val repository=MemoryRepository(applicationContext).also{memoryRepository=it}
+                com.miniichat.memory.MemoryRetrieval.prompt(repository.relevant(assistant.id,conversation?.messages.orEmpty().takeLast(8).joinToString { it.content }))
+            } catch(cancelled:kotlinx.coroutines.CancellationException){throw cancelled}
+            catch(error:Exception){Log.w(TAG,"Optional memory unavailable type=${error.javaClass.simpleName}");""} else ""
             val recent = conversation?.messages.orEmpty().takeLast(28).joinToString("\n") {
-                "${if (it.role == "user") "User" else assistant.displayName}: ${it.content.take(900)}"
+                "[${java.time.Instant.ofEpochMilli(it.createdAt).atZone(java.time.ZoneId.systemDefault())}] ${if (it.role == "user") "User" else assistant.displayName}: ${it.content.take(900)}"
             }.takeLast(14_000)
-            val screen = if (assistant.id == settings.activeAssistantId) com.miniichat.tasks.ScreenCompanion.observe(applicationContext) else null
+            val screen = try {if (assistant.id == settings.activeAssistantId) com.miniichat.tasks.ScreenCompanion.observe(applicationContext) else null}
+                catch(cancelled:kotlinx.coroutines.CancellationException){throw cancelled}
+                catch(error:Exception){Log.w(TAG,"Optional screen unavailable type=${error.javaClass.simpleName}");null}
             val prompt = """
                 You decide whether ${assistant.displayName} has a meaningful reason to contact User now.
+                Current local time: ${java.time.ZonedDateTime.now()}.
+                ${if(manual) "User explicitly requested one proactive-message test now. Return SEND with a brief in-character greeting or a natural question based on the context. This one requested test does not require an external event." else "This is an automatic check. A natural follow-up question about a recent user topic is allowed; do not require an urgent event."}
                 Return one JSON object only:
                 {"action":"SEND|SKIP","message":"","topic_summary":"","reason":"","next_contact_tendency":0.0}
 
@@ -157,7 +182,7 @@ class ProactiveMessageWorker(
                 - This is companionship, not a task assistant or productivity reminder. A warm greeting, sharing a thought,
                   continuing a topic or a first introduction can be a natural reason. No file task or event rule is required.
                 - Follow the character's language, intimacy, reserve and tone. Do not repeatedly advertise tools or offer work.
-                - SKIP if the character would rather stay quiet. Never fabricate a real-world activity by User or the character.
+                - ${if(manual) "This is an explicitly requested test: SEND one natural greeting or follow-up question." else "SKIP if the character would rather stay quiet."} Never fabricate a real-world activity by User or the character.
                 - Do not repeatedly send generic phrases such as "are you there", "what are you doing", or "have you eaten".
                 - Never invent User's real-world activity, mood, location, or facts not supported below.
                 - Do not repeat any recent proactive topic.
@@ -203,7 +228,8 @@ class ProactiveMessageWorker(
             if (!latestAssistant.canContact(settingsRepository.settings.first().proactiveMessagesEnabled)) return
             // Don't insert an unsolicited message over a conversation the user has just resumed.
             if (conversation != null && conversationStore.snapshot().firstOrNull { it.id == conversation.id }?.updatedAt != conversation.updatedAt) {
-                assistantStore.update(assistant.id) { it.withNext(settings, 0.2) }; return
+                ProactiveDiagnostics.record(applicationContext,assistant.id,"对话刚有新内容，稍后依据新内容判断")
+                assistantStore.update(assistant.id) { it.copy(nextProactiveCheckAt=System.currentTimeMillis()+ProactivePolicy.RECENT_USER_ACTIVITY_MILLIS) }; return
             }
             if (decision.action.equals("SEND", true) && decision.message.isNotBlank()) {
                 val message = Message(
@@ -211,22 +237,23 @@ class ProactiveMessageWorker(
                     role = "assistant",
                     content = decision.message.trim().take(1200),
                     modelId = modelId,
+                    providerId = provider.id,
                     personaId = assistant.id,
                     isProactive = true,
-                    createdAt = now
+                    createdAt = System.currentTimeMillis()
                 )
                 val saved = if (conversation != null) conversationStore.appendMessage(conversation.id, message) ?: return
                     else com.miniichat.data.Conversation(id = newId(), title = "与${assistant.displayName}聊天", assistantId = assistant.id, messages = listOf(message)).also { conversationStore.upsert(it) }
-                assistantStore.update(assistant.id) { it.afterSuccess(settings, decision, now) }
-                settingsRepository.update { it.copy(lastProactiveMessageAt = now) }
-                ProactiveNotifications.publish(
+                assistantStore.update(assistant.id) { it.afterSuccess(settings, decision, message.createdAt) }
+                settingsRepository.update { it.copy(lastProactiveMessageAt = message.createdAt) }
+                val notified=ProactiveNotifications.publish(
                     applicationContext,
                     assistant.displayName,
                     message.content,
                     assistant.avatarPath,
                     ProactiveDestination("normal", conversationId = saved.id)
                 )
-                ProactiveDiagnostics.record(applicationContext,assistant.id,ProactiveNotifications.blockedReason(applicationContext)?.let {"消息已保存，但$it"}?:"主动消息已发送")
+                ProactiveDiagnostics.record(applicationContext,assistant.id,if(notified)"主动消息已保存，并已提交通知" else "消息已保存，但${ProactiveNotifications.blockedReason(applicationContext)?:"系统未接受通知"}")
                 com.miniichat.memory.MemoryWork.enqueueConversation(applicationContext,saved.id)
                 Log.i(
                     TAG,
@@ -234,7 +261,7 @@ class ProactiveMessageWorker(
                         "model=$diagnosticModel"
                 )
             } else {
-                ProactiveDiagnostics.record(applicationContext,assistant.id,"本次人设选择保持安静，已安排下次判断")
+            ProactiveDiagnostics.record(applicationContext,assistant.id,if(manual)"模型本次选择保持安静，测试未发出消息" else "本次人设选择保持安静，已安排下次判断")
                 assistantStore.update(assistant.id) { it.withNext(settings, decision.next_contact_tendency) }
                 Log.i(
                     TAG,
@@ -245,7 +272,7 @@ class ProactiveMessageWorker(
         } catch (error: kotlinx.coroutines.CancellationException) { throw error
         } catch (error: Throwable) {
             ProactiveDiagnostics.record(applicationContext,assistant.id,if(error is com.miniichat.api.LlmHttpException)"模型服务 HTTP ${error.statusCode}，稍后重试" else "主动判断失败（${error.javaClass.simpleName}），稍后重试")
-            com.miniichat.error.AppErrorStore(applicationContext).record(IllegalStateException("主动消息判断 ${error.javaClass.simpleName}"))
+            runCatching{com.miniichat.error.AppErrorStore(applicationContext).record(IllegalStateException("主动消息判断 ${error.javaClass.simpleName}"))}
             if (assistant.id == settings.activeAssistantId && (com.miniichat.tasks.ScreenShare.running.value || com.miniichat.tasks.ScreenCompanion.enabled.value))
                 com.miniichat.tasks.ScreenCompanion.reportFailure(error)
             assistantStore.update(assistant.id) { it.afterFailure(settings) }
@@ -255,7 +282,7 @@ class ProactiveMessageWorker(
                     "model=$diagnosticModel type=${error.javaClass.name}"
             )
         } finally {
-            memoryRepository.close()
+            memoryRepository?.close()
         }
     }
 
@@ -287,12 +314,9 @@ class ProactiveMessageWorker(
         val objectText = content.substringAfter('{', "").takeIf { it.isNotBlank() }
             ?.let { "{" + it.substringBeforeLast('}', "") + "}" }
             ?: error("Proactive decision JSON missing")
-        return json.decodeFromString(ProactiveDecision.serializer(), objectText)
-    }
-
-    private fun shouldWaitForUser(messages: List<HistoryMessage>, now: Long): Boolean {
-        val last = messages.lastOrNull() ?: return false
-        return ProactivePolicy.shouldWait(last.role,last.createdAt,last.isProactive,now)
+        return json.decodeFromString(ProactiveDecision.serializer(), objectText).also {
+            require(it.action.uppercase() in setOf("SEND","SKIP") && (it.action.equals("SKIP",true) || it.message.isNotBlank())) {"主动判断返回格式错误"}
+        }
     }
 
     private fun Assistant.withNext(settings: AppSettings, contactTendency: Double?) = copy(
@@ -316,19 +340,8 @@ class ProactiveMessageWorker(
     )
 
     private fun Assistant.afterFailure(settings: AppSettings) = copy(
-        nextProactiveCheckAt = System.currentTimeMillis() + if (proactiveConsentVersion >= 1) ProactivePolicy.personaDelay(this, Random.nextDouble(), failure = proactiveFailureCount + 1) else ProactivePolicy.nextDelayMillis(
-            if (proactiveConsentVersion >= 1) "persona" else settings.proactiveFrequency,
-            Random.nextDouble(),
-            failureCount = proactiveFailureCount + 1
-        ),
+        nextProactiveCheckAt = System.currentTimeMillis() + ProactivePolicy.retryDelayMillis(proactiveFailureCount+1),
         proactiveFailureCount = (proactiveFailureCount + 1).coerceAtMost(6)
-    )
-
-    private data class HistoryMessage(
-        val role: String,
-        val text: String,
-        val createdAt: Long,
-        val isProactive: Boolean
     )
 
     companion object {

@@ -79,12 +79,12 @@ object ProactiveNotifications {
         message: String,
         avatarPath: String?,
         destination: ProactiveDestination
-    ) {
+    ): Boolean {
         com.miniichat.tasks.PetMessages.show("$characterName：$message", destination.conversationId)
         if (AppVisibility.isForeground) {
             ProactiveNavigation.showForegroundNotice("$characterName：$message")
         }
-        if (blockedReason(context) != null) return
+        if (blockedReason(context) != null) return false
 
         val manager = context.getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -129,11 +129,13 @@ object ProactiveNotifications {
             .setContentIntent(pendingIntent)
             .setLargeIcon(avatar)
             .build()
-        try {
+        return try {
             NotificationManagerCompat.from(context).notify(requestCode, notification)
+            true
         } catch (_: SecurityException) {
             // Permission can be revoked between checking it and posting; the conversation is already saved.
             Log.w("ProactiveNotifications", "Notification permission changed before delivery")
+            false
         }
     }
 

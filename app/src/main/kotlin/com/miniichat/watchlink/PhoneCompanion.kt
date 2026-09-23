@@ -36,7 +36,16 @@ object PhoneCompanion {
                     val answerId=UUID.nameUUIDFromBytes((channel+":"+turnId).toByteArray()).toString()
                     if(chat.messages.any{it.id==answerId}){db.finish(channel,turnId);continue}
                     val now=System.currentTimeMillis()
-                    if(proactive && !shouldContact(persona,settings,chat,event!!,now)) {db.finish(channel,turnId);continue}
+                    if(proactive) {
+                        val retryAt=contactRetryAt(persona,settings,chat,event!!,now)
+                        if(retryAt==null){db.finish(channel,turnId);continue}
+                        if(retryAt>now){
+                            db.defer(channel,turnId,retryAt)
+                            ProactiveDiagnostics.record(context,persona.id,"设备事件已保留，${com.miniichat.ui.formatMessageTime(retryAt)} 后判断是否联系")
+                            continue
+                        }
+                        ProactiveDiagnostics.record(context,persona.id,"正在结合设备事件判断是否联系")
+                    }
                     val provider=ProviderStore(context).snapshot().firstOrNull{it.id==(persona.preferredProviderId?:settings.activeProviderId) && it.enabled}?:error("请先配置当前人设的模型服务")
                     val model=persona.preferredModel?.takeIf{it.isNotBlank()}?:settings.activeModel
                     check(model.isNotBlank()){ "请先选择当前人设的模型" }
@@ -58,7 +67,10 @@ object PhoneCompanion {
                     val answer=if(proactive){
                         val decision=JSONObject(result.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim())
                         require(decision.getString("action") in setOf("SEND","SKIP"))
-                        if(decision.getString("action")=="SKIP"){db.finish(channel,turnId);PhoneLink.setPresence(context,"idle");continue}
+                        if(decision.getString("action")=="SKIP"){
+                            ProactiveDiagnostics.record(context,persona.id,"设备事件已判断，本次人设选择保持安静")
+                            db.finish(channel,turnId);PhoneLink.setPresence(context,"idle");continue
+                        }
                         decision.getString("message").take(1200)
                     }else result
                     check(answer.isNotBlank()){ "模型返回为空" }
@@ -67,7 +79,12 @@ object PhoneCompanion {
                     val currentPersona=AssistantStore(context).snapshot().firstOrNull{it.id==persona.id}
                     if(!freshConfig.enabled || PhoneHub.channel(context)!=channel || current==null || currentPersona==null){db.finish(channel,turnId);continue}
                     if(user!=null && current.messages.none{it.id==user.id && it.content==user.content}){db.finish(channel,turnId);continue}
-                    if(proactive && (current.updatedAt!=chat.updatedAt || !shouldContact(currentPersona,SettingsRepository(context).settings.first(),current,event!!,System.currentTimeMillis()))){db.finish(channel,turnId);continue}
+                    if(proactive) {
+                        val checkedAt=System.currentTimeMillis()
+                        val next=contactRetryAt(currentPersona,SettingsRepository(context).settings.first(),current,event!!,checkedAt)
+                        if(next==null){db.finish(channel,turnId);continue}
+                        if(current.updatedAt!=chat.updatedAt || next>checkedAt){db.defer(channel,turnId,maxOf(next,checkedAt+60000));continue}
+                    }
                     val message=Message(answerId,"assistant",answer,providerId=provider.id,modelId=model,personaId=persona.id,isProactive=proactive)
                     val saved=ConversationStore(context).updateConversation(chat.id){c->if(c.messages.any{it.id==answerId})c else c.copy(messages=c.messages+message,updatedAt=System.currentTimeMillis())}
                     if(saved!=null) {
@@ -77,23 +94,32 @@ object PhoneCompanion {
                             AssistantStore(context).update(persona.id){it.copy(lastProactiveMessageAt=message.createdAt)}
                             SettingsRepository(context).update{it.copy(lastProactiveMessageAt=message.createdAt)}
                         }
-                        ProactiveNotifications.publish(context,currentPersona.displayName,answer,currentPersona.avatarPath,ProactiveDestination("normal",chat.id))
+                        val notified=ProactiveNotifications.publish(context,currentPersona.displayName,answer,currentPersona.avatarPath,ProactiveDestination("normal",chat.id))
+                        if(proactive)ProactiveDiagnostics.record(context,persona.id,if(notified)"设备事件消息已保存并提交通知" else "设备事件消息已保存，但${ProactiveNotifications.blockedReason(context)?:"系统未接受通知"}")
                         PhoneLink.setPresence(context,"talking")
                     }
                     db.finish(channel,turnId)
                 }catch(cancelled:CancellationException){throw cancelled}
-                catch(error:Exception){db.fail(channel,turnId);PhoneLink.status.value="消息已保存，模型回复待重试";PhoneLink.setPresence(context,"idle")}
+                catch(error:Exception){
+                    db.fail(channel,turnId);PhoneLink.status.value="消息已保存，模型回复待重试";PhoneLink.setPresence(context,"idle")
+                    ProactiveDiagnostics.record(context,config.profile.optString("persona_id"),"设备事件或手表回复失败（${error.javaClass.simpleName}），稍后重试")
+                }
             }
         }
     }
     internal fun shouldContact(persona:Assistant,settings:AppSettings,chat:Conversation,event:JSONObject,now:Long):Boolean {
-        if(!persona.canContact(settings.proactiveMessagesEnabled))return false
-        if(ProactivePolicy.isInDoNotDisturb(now,settings.proactiveDndStartMinutes,settings.proactiveDndEndMinutes))return false
-        if(now-event.optLong("at") !in 0..1800000)return false
-        if(now-persona.lastProactiveMessageAt<45*60000)return false
-        if(chat.messages.lastOrNull()?.let{ProactivePolicy.shouldWait(it.role,it.createdAt,it.isProactive,now)}==true)return false
-        if(chat.messages.any{it.role=="user" && now-it.createdAt in 0..180000})return false
-        if(chat.messages.any{it.deliveryStatus==MessageDeliveryStatus.STREAMING})return false
-        return true
+        return contactRetryAt(persona,settings,chat,event,now)==now
+    }
+    internal fun contactRetryAt(persona:Assistant,settings:AppSettings,chat:Conversation,event:JSONObject,now:Long):Long? {
+        if(!persona.canContact(settings.proactiveMessagesEnabled))return null
+        val eventAt=event.optLong("at")
+        if(eventAt<=0 || now-eventAt !in 0..1800000)return null
+        val last=chat.messages.lastOrNull()
+        var at=ProactivePolicy.quietUntil(last?.role,last?.createdAt?:0,last?.isProactive?:false,now,ProactivePolicy.unansweredCooldown(persona))
+        if(settings.lastProactiveMessageAt>0)at=maxOf(at,settings.lastProactiveMessageAt+ProactivePolicy.GLOBAL_THROTTLE_MILLIS)
+        if(ProactivePolicy.isInDoNotDisturb(now,settings.proactiveDndStartMinutes,settings.proactiveDndEndMinutes))
+            at=maxOf(at,ProactivePolicy.endOfDoNotDisturbMillis(now,settings.proactiveDndEndMinutes))
+        if(chat.messages.any{it.deliveryStatus==MessageDeliveryStatus.STREAMING})at=maxOf(at,now+60000)
+        return at.takeIf{it<=eventAt+1800000}
     }
 }
