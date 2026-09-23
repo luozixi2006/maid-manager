@@ -4,17 +4,20 @@ android {
     compileSdk = 34
     defaultConfig {
         applicationId="com.maidmanager.watch"; minSdk=26; targetSdk=34
-        versionCode=providers.gradleProperty("BUILD_VERSION_CODE").orNull?.toInt() ?: 300000012
-        versionName=providers.gradleProperty("BUILD_VERSION_NAME").orNull ?: "3.0.12"
+        versionCode=providers.gradleProperty("BUILD_VERSION_CODE").orNull?.toInt() ?: 300000013
+        versionName=providers.gradleProperty("BUILD_VERSION_NAME").orNull ?: "3.0.13"
     }
     signingConfigs {
         getByName("debug") {
-            storeFile=file("${System.getenv("ANDROID_USER_HOME") ?: "${System.getProperty("user.home")}/.android"}/debug.keystore")
+            val existingDebugStore = file("${System.getenv("ANDROID_USER_HOME") ?: "${System.getProperty("user.home")}/.android"}/debug.keystore")
+            // Preserve an existing local certificate. On a fresh machine, leave
+            // AGP's default path intact so it can generate a disposable debug key.
+            if (existingDebugStore.isFile) storeFile = existingDebugStore
         }
         val watchStore=providers.gradleProperty("WATCH_STORE_FILE").orNull ?: System.getenv("WATCH_STORE_FILE")
         if(!watchStore.isNullOrBlank()) create("watchUpgrade") {
             // Preserve the certificate of the previously installed watch test APK.
-            // The private keystore is outside the repository and stored as a CI secret.
+            // The private keystore stays outside the repository; CI use is optional.
             storeFile=file(watchStore);storePassword="android";keyAlias="androiddebugkey";keyPassword="android"
         }
     }
