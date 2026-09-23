@@ -26,6 +26,7 @@ class SensingService:Service(),SensorEventListener {
     private var heartStatus="not_started"
     private var heartAttemptAt=0L
     private var stepRegistered=false
+    private lateinit var sensingBinding:WatchBinding
     private val recordLock=kotlinx.coroutines.sync.Mutex()
     private val significant=object:TriggerEventListener(){override fun onTrigger(event:TriggerEvent){moving=true;armMotion();scope.launch{record()}}}
     private fun armMotion(){sensors.getDefaultSensor(Sensor.TYPE_SIGNIFICANT_MOTION)?.let{runCatching{sensors.requestTriggerSensor(significant,it)}}}
@@ -33,6 +34,7 @@ class SensingService:Service(),SensorEventListener {
     override fun onBind(intent:Intent?)=null
     override fun onCreate() {
         super.onCreate();sensors=getSystemService(SensorManager::class.java)
+        sensingBinding=WatchConnection.binding(LinkConfig(this))
         val saved=LinkStore(this).use{it.meta("sensor_state")}.ifBlank{prefs.getString("state","{}").orEmpty()}
         reducer=ActivityReducer(runCatching {Json.decodeFromString<State>(saved)}.getOrDefault(State()).copy(worn=null,heartRate=null))
     }
@@ -128,10 +130,12 @@ class SensingService:Service(),SensorEventListener {
         moving=null;hr=null
         recordLock.lock()
         try {withContext(Dispatchers.IO) {
-        val events=reducer.accept(sample)
         LinkStore(this@SensingService).use {store->
             val db=store.writableDatabase;db.beginTransaction()
             try {
+            val link=LinkConfig(this@SensingService)
+            if(!link.enabled || WatchConnection.binding(link).key!=sensingBinding.key)return@withContext
+            val events=reducer.accept(sample)
             for(event in events) {
                 val body=JSONObject(Json.encodeToString(event)).put("source","watch")
                 store.enqueue("event",event.id,body)

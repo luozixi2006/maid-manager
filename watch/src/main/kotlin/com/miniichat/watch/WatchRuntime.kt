@@ -22,14 +22,18 @@ object WatchRuntime {
     val sensing=MutableStateFlow(false)
     val revision=MutableStateFlow(0)
     private val lock=Mutex()
+    internal suspend fun <T> connectionChange(action:()->T):T=lock.withLock{action()}
     suspend fun run(context:Context) = lock.withLock {
         if(!LinkConfig(context).enabled) return@withLock
         try {
+            LinkStore(context).use{check(ConnectionRecords(it).matches(WatchConnection.binding(LinkConfig(context)))){"配对尚未完成，请重新输入手机配对码；原记录仍保留"}}
             val initial=LinkStore(context).use{it.meta("cursor").isBlank()}
             val received=LinkClient.sync(context).toMutableList()
+            if(!LinkConfig(context).enabled)return@withLock
             val thoughtError=runCatching{LinkClient.think(context)}.exceptionOrNull()
             if(thoughtError is CancellationException)throw thoughtError
             received+=LinkClient.sync(context)
+            if(!LinkConfig(context).enabled)return@withLock
             received.filter {!initial && it.getString("kind")=="message" && it.getJSONObject("body").optString("role")=="assistant"}.forEach {change->
                 val profile=LinkConfig(context).profile; val text=change.getJSONObject("body").optString("content")
                 val manager=context.getSystemService(NotificationManager::class.java)
@@ -45,7 +49,7 @@ object WatchRuntime {
             }
             status.value=if(thoughtError!=null)"记录已同步，回复待重试" else "已同步";revision.value++
         } catch(cancelled:CancellationException) { throw cancelled }
-        catch(error:Exception) { status.value=failureText(error) }
+        catch(error:Exception) { if(LinkConfig(context).enabled)status.value=failureText(error) }
     }
     /** Only short, app-authored diagnostics reach the UI; transport payloads and the token never do. */
     private fun failureText(error:Exception):String {

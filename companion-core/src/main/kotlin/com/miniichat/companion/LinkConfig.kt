@@ -21,12 +21,13 @@ class LinkConfig(context: Context) {
     fun enabled(value: Boolean) { prefs.edit().putBoolean("enabled",value).commit() }
     val profile: JSONObject get() = runCatching { JSONObject(prefs.getString("profile","{}")!!) }.getOrDefault(JSONObject())
     fun profile(value: JSONObject) { prefs.edit().putString("profile",value.toString()).commit() }
-    fun save(base: String, result: JSONObject) {
+    fun save(base: String, result: JSONObject, enabled:Boolean=true, profile:JSONObject?=null) {
         if(base.startsWith("bluetooth://")) BluetoothLink.validate(base) else CompanionHttp.validate(base)
         val cipher=Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE,key()) }
         val sealed=cipher.iv+cipher.doFinal(result.getString("token").toByteArray(Charsets.UTF_8))
         check(prefs.edit().putString("base",base.trimEnd('/')).putString("conversation",result.getString("conversation_id"))
-            .putString("device",result.getString("device_id")).putString("token",Base64.encodeToString(sealed,Base64.NO_WRAP)).putBoolean("enabled",true).commit())
+            .putString("device",result.getString("device_id")).putString("token",Base64.encodeToString(sealed,Base64.NO_WRAP)).putBoolean("enabled",enabled)
+            .apply{if(profile!=null)putString("profile",profile.toString())}.commit())
     }
     fun token(): String {
         val sealed=Base64.decode(prefs.getString("token","").orEmpty(),Base64.NO_WRAP)

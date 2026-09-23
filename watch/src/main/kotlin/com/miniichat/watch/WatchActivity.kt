@@ -28,6 +28,9 @@ class WatchActivity:ComponentActivity() {
     private var headerName:TextView?=null
     private var headerAvatar:ImageView?=null
     private var headerProfile=""
+    private var showPairing=false
+    private var busy=false
+    private var pendingInfo:TextView?=null
     private val permissions=registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {startSensingIfAllowed()}
     // Nearby-device consent is a separate callback: granting it must never start body sensing.
     private val nearby=registerForActivityResult(ActivityResultContracts.RequestPermission()) {render()}
@@ -38,47 +41,13 @@ class WatchActivity:ComponentActivity() {
         } }
     }
     private fun label(text:String,size:Float=15f)=TextView(this).apply {this.text=text;textSize=size;setTextColor(0xffeeeeee.toInt());setPadding(8,8,8,8)}
-    private fun button(text:String,action:()->Unit)=Button(this).apply {this.text=text;isAllCaps=false;textSize=13f;setOnClickListener{action()}}
+    private fun button(text:String,action:()->Unit)=Button(this).apply {this.text=text;isAllCaps=false;textSize=13f;isEnabled=!busy;setOnClickListener{action()}}
     private fun render() {
         column=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL;setPadding(14,18,14,18);setBackgroundColor(0xff16171b.toInt())}
         val scroll=ScrollView(this).apply {addView(column)};setContentView(scroll)
         val config=LinkConfig(this)
-        if(!config.enabled) {
-            column.addView(label("与手机上的她连接",18f))
-            column.addView(label("先在手机“手表与感知”里选原有会话，生成配对码。只同步你选中的会话。",12f))
-            val allowed=BluetoothLink.allowed(this)
-            val peers:List<android.bluetooth.BluetoothDevice> = if(allowed) runCatching{BluetoothLink.peers(this)}.getOrNull().orEmpty() else emptyList()
-            val spinner=Spinner(this)
-            when {
-                !allowed -> {
-                    column.addView(label("需要“附近的设备”权限才能读取已经和手表配对的手机。",12f))
-                    column.addView(button("允许附近的设备权限") {if(Build.VERSION.SDK_INT>=31)nearby.launch(Manifest.permission.BLUETOOTH_CONNECT)})
-                }
-                peers.isEmpty() -> {
-                    column.addView(label("没有可用的已配对手机：请先在手表与手机的系统蓝牙设置里把两台设备配好对，再回到这里重新读取。",12f))
-                    column.addView(button("重新读取已配对设备") {render()})
-                }
-                else -> {
-                    spinner.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_item,peers.map{it.name?.takeIf{name->name.isNotBlank()}?:it.address})
-                        .apply{setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)}
-                    column.addView(label("已配对的手机",12f));column.addView(spinner)
-                }
-            }
-            val code=EditText(this).apply{hint="一次性配对码";setTextColor(-1);setHintTextColor(0xff888888.toInt());setSingleLine(true)}
-            column.addView(code);status=label("");column.addView(status)
-            column.addView(button("连接同一会话") {lifecycleScope.launch {
-                val device=peers.getOrNull(spinner.selectedItemPosition)
-                if(device==null){status.text="请先允许“附近的设备”权限并选择已配对的手机";return@launch}
-                val base="bluetooth://"+device.address
-                try {withContext(Dispatchers.IO){BluetoothLink.validate(base)
-                    check(LinkStore(this@WatchActivity).use{it.outgoing().length()==0 && it.thoughts().isEmpty()}){"仍有未同步内容，请先恢复原连接"}
-                    val result=CompanionTransport.call(this@WatchActivity,base,"","/v1/pair",JSONObject().put("code",code.text.toString().trim()))
-                    config.save(base,result);LinkStore(this@WatchActivity).use{it.clear();it.meta("bound",config.conversationId)};WatchRuntime.schedule(this@WatchActivity)}
-                    render();withContext(Dispatchers.IO){WatchRuntime.run(this@WatchActivity)};refresh()
-                } catch(e:Exception){status.text=e.message?:"配对失败"}
-            }})
-            if(config.conversationId.isNotBlank())column.addView(button("恢复原连接") {config.enabled(true);render();WatchRuntime.schedule(this)})
-            column.addView(button("检查传感器") {startActivity(Intent(this,SensorCheckActivity::class.java))})
+        if(!config.enabled || showPairing) {
+            disconnected(config)
             return
         }
         val profile=config.profile
@@ -89,6 +58,15 @@ class WatchActivity:ComponentActivity() {
         header.addView(name);column.addView(header)
         headerAvatar=avatar;headerName=name;headerProfile=profile.toString();applyProfile(profile)
         status=label(WatchRuntime.status.value,12f);column.addView(status)
+        val connectionButtons=LinearLayout(this)
+        connectionButtons.addView(button("立即同步"){syncNow()},LinearLayout.LayoutParams(0,-2,1f))
+        connectionButtons.addView(button("断开"){WatchConnection.pause(this);showPairing=false;render()},LinearLayout.LayoutParams(0,-2,1f))
+        column.addView(connectionButtons)
+        val reconnectButtons=LinearLayout(this)
+        reconnectButtons.addView(button("重新配对"){openPairing()},LinearLayout.LayoutParams(0,-2,1f))
+        reconnectButtons.addView(button("旧会话"){showBackups()},LinearLayout.LayoutParams(0,-2,1f))
+        column.addView(reconnectButtons)
+        pendingInfo=label("",12f).apply{setOnClickListener{showPending()}};column.addView(pendingInfo)
         val controls=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;visibility=android.view.View.GONE}
         controls.addView(button("开启身体感知") {
             val required=mutableListOf(Manifest.permission.BODY_SENSORS)
@@ -113,8 +91,95 @@ class WatchActivity:ComponentActivity() {
             android.app.AlertDialog.Builder(this).setTitle("最近事件（观察记录）").setMessage(events.joinToString("\n"){val b=it.getJSONObject("body");java.text.SimpleDateFormat("MM-dd HH:mm",java.util.Locale.getDefault()).format(java.util.Date(b.optLong("at")))+" "+b.optString("summary")+" ["+b.optString("confidence")+"]"}.ifBlank{"还没有记录"}).setPositiveButton("关闭",null).show()
         })
         controls.addView(button("检查传感器") {startActivity(Intent(this,SensorCheckActivity::class.java))})
-        controls.addView(button("断开并暂停") {config.enabled(false);stopService(Intent(this,SensingService::class.java));render()})
         refresh()
+    }
+    private fun disconnected(config:LinkConfig) {
+        column.addView(label("连接手机",18f))
+        status=label(if(config.conversationId.isBlank())"尚未配对" else WatchRuntime.status.value,12f);column.addView(status)
+        if(config.conversationId.isNotBlank()) {
+            column.addView(label("已保存：${config.profile.optString("name","原会话")}",14f))
+            column.addView(button("连接原手机"){syncNow()})
+            if(!showPairing)column.addView(button("重新配对"){openPairing()})
+        }
+        val counts=LinkStore(this).use{ConnectionRecords(it).pending()}
+        column.addView(label(counts.describe(),12f))
+        column.addView(button("待同步记录 / 处理办法"){showPending()})
+        column.addView(button("保留的旧会话"){showBackups()})
+        if(showPairing || config.conversationId.isBlank())pairingForm(config)
+        else column.addView(label("断开会暂停感知和同步，不删除记录。连接后可在“感知与连接”里重新开启感知。",12f))
+        column.addView(button("检查传感器"){startActivity(Intent(this,SensorCheckActivity::class.java))})
+    }
+    private fun pairingForm(config:LinkConfig) {
+        column.addView(label("手机 → 手表与感知 → 选择原会话 → 生成新配对码。同一会话会继续补传，不要求先清空待同步内容。",12f))
+        val peers=if(BluetoothLink.allowed(this))runCatching{BluetoothLink.peers(this)}.getOrNull().orEmpty() else emptyList()
+        val spinner=Spinner(this)
+        if(!BluetoothLink.allowed(this))column.addView(button("允许附近设备权限"){if(Build.VERSION.SDK_INT>=31)nearby.launch(Manifest.permission.BLUETOOTH_CONNECT)})
+        else if(peers.isEmpty()) {
+            column.addView(label("没有已配对手机。请先在系统蓝牙设置中配对，再重新读取。",12f))
+            column.addView(button("打开蓝牙设置"){startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))})
+            column.addView(button("重新读取设备"){render()})
+        } else {
+            spinner.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_item,peers.map{it.name?.takeIf{name->name.isNotBlank()}?:it.address}).apply{setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)}
+            val current=peers.indexOfFirst{"bluetooth://"+it.address==config.base}
+            if(current>=0)spinner.setSelection(current)
+            column.addView(spinner)
+        }
+        val code=EditText(this).apply{hint="8 位配对码";setTextColor(-1);setHintTextColor(0xff999999.toInt());setSingleLine();inputType=android.text.InputType.TYPE_CLASS_NUMBER}
+        column.addView(code)
+        column.addView(button("验证并连接") {
+            val device=peers.getOrNull(spinner.selectedItemPosition)
+            if(device==null){status.text="请先选择已配对手机";return@button}
+            val value=code.text.toString().trim()
+            work("正在验证配对…") {
+                val candidate=WatchConnection.prepare(this@WatchActivity,"bluetooth://"+device.address,value)
+                if(candidate.sameConnection || candidate.previous.conversation.isBlank())finishPairing(candidate)
+                else android.app.AlertDialog.Builder(this@WatchActivity).setTitle("这是另一段会话")
+                    .setMessage("原会话：${candidate.previous.name}\n新会话：${candidate.binding.name}\n\n旧消息、待同步内容和事件将保留在本表，不会发给新会话。以后重新配对原会话可继续补传。")
+                    .setPositiveButton("保留旧记录并切换"){_,_->work("正在保留记录并连接…"){finishPairing(candidate)}}
+                    .setNegativeButton("取消"){_,_->status.text="未切换，原记录保留。下次配对请在手机生成新码。"}
+                    .setOnCancelListener{status.text="未切换，原记录保留。下次配对请在手机生成新码。"}.show()
+            }
+        })
+        if(config.conversationId.isNotBlank())column.addView(button("返回连接页面"){showPairing=false;render()})
+    }
+    private fun openPairing() {WatchConnection.pause(this);showPairing=true;render()}
+    private suspend fun finishPairing(candidate:PairCandidate) {
+        WatchConnection.accept(this,candidate);showPairing=false;render()
+        withContext(Dispatchers.IO){WatchRuntime.run(this@WatchActivity)};refresh()
+    }
+    private fun syncNow()=work("正在连接并同步…") {
+        if(!LinkConfig(this@WatchActivity).enabled){WatchConnection.resume(this@WatchActivity);showPairing=false;render()}
+        withContext(Dispatchers.IO){WatchRuntime.run(this@WatchActivity)};refresh()
+    }
+    private fun work(progress:String,action:suspend ()->Unit) {
+        if(busy)return
+        busy=true;setButtons(column,false);status.text=progress
+        lifecycleScope.launch {
+            try {action()} catch(cancelled:CancellationException){throw cancelled}
+            catch(error:Exception) {
+                status.text=if(error is LinkFailure || error is IllegalStateException || error is IllegalArgumentException)error.message?.take(120)?:"连接失败，记录未删除" else "未能连接手机。请打开手机“手表与感知”，保持蓝牙开启后重试。记录仍保留。"
+            } finally {busy=false;setButtons(column,true)}
+        }
+    }
+    private fun setButtons(view:android.view.View,enabled:Boolean) {
+        if(view is Button)view.isEnabled=enabled
+        if(view is android.view.ViewGroup)for(i in 0 until view.childCount)setButtons(view.getChildAt(i),enabled)
+    }
+    private fun showPending() {
+        val text=LinkStore(this).use{val records=ConnectionRecords(it);records.pending().describe()+"\n\n"+records.preview()}
+        android.app.AlertDialog.Builder(this).setTitle("内容仍在手表")
+            .setMessage(text+"\n\n原连接还能用：点“立即补传”。手机生成过新码：点“重新配对”，选择原来的会话即可保留并补传。不要卸载应用。")
+            .setPositiveButton("立即补传"){_,_->syncNow()}.setNeutralButton("重新配对"){_,_->openPairing()}.setNegativeButton("关闭",null).show()
+    }
+    private fun showBackups() {
+        val backups=LinkStore(this).use{ConnectionRecords(it).backups()}
+        if(backups.isEmpty()){android.app.AlertDialog.Builder(this).setMessage("没有旧会话备份；当前内容仍在当前会话。只有切换到其他会话时才会单独保留。").setPositiveButton("关闭",null).show();return}
+        android.app.AlertDialog.Builder(this).setTitle("保留的旧会话").setItems(backups.map{it.binding.name+" · "+java.text.SimpleDateFormat("MM-dd HH:mm",java.util.Locale.getDefault()).format(java.util.Date(it.savedAt))}.toTypedArray()){_,index->
+            val backup=backups[index]
+            val text=LinkStore(this).use{ConnectionRecords(it).preview(backup.binding)}
+            android.app.AlertDialog.Builder(this).setTitle(backup.binding.name).setMessage(backup.pending.describe()+"\n\n"+text+"\n\n恢复方法：在原手机选择这段原会话，生成新码后点下面的“重新配对”。配对成功会自动恢复这些记录并补传，不会并入其他人设。")
+                .setPositiveButton("重新配对"){_,_->openPairing()}.setNegativeButton("关闭",null).show()
+        }.setNegativeButton("关闭",null).show()
     }
     private fun startSensingIfAllowed() {try {ContextCompat.startForegroundService(this,Intent(this,SensingService::class.java))}catch(_:Exception){WatchRuntime.status.value="请保持应用打开后开启感知"};refresh()}
     private fun send(text:String) {
@@ -128,13 +193,14 @@ class WatchActivity:ComponentActivity() {
         lifecycleScope.launch{withContext(Dispatchers.IO){WatchRuntime.run(this@WatchActivity)};refresh()}
     }
     private fun refresh() {
-        if(!::messages.isInitialized || !LinkConfig(this).enabled)return
+        if(!::messages.isInitialized || !LinkConfig(this).enabled || showPairing)return
         status.text=WatchRuntime.status.value+" · "+when(LinkClient.presence(this)){"observing"->"陪着你";"awake"->"留意到了";"talking"->"想和你说话";"sleeping"->"安静陪伴";else->"我在"}
         val profile=LinkConfig(this).profile
         // A profile change only repaints the header; the rest of the form, including unsent input, is untouched.
         if(profile.toString()!=headerProfile){headerProfile=profile.toString();applyProfile(profile)}
         messages.removeAllViews()
         LinkStore(this).use {store->
+            pendingInfo?.text=ConnectionRecords(store).pending().describe()+"\n点此查看记录和处理办法"
             val confirmed=store.items("context").lastOrNull{it.getString("id")=="watch" && !it.optBoolean("deleted")}?.getJSONObject("body")
             val local=store.writableDatabase.rawQuery("SELECT body FROM outbox WHERE kind='context' AND id='watch'",null).use{cursor->if(cursor.moveToFirst())JSONObject(cursor.getString(0)) else null}
             val latest=local?:confirmed
