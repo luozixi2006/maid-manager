@@ -25,6 +25,7 @@ class SensingService:Service(),SensorEventListener {
     private var moving:Boolean?=null;private var acceleration:Float?=null
     private var heartStatus="not_started"
     private var heartAttemptAt=0L
+    private var stepRegistered=false
     private val recordLock=kotlinx.coroutines.sync.Mutex()
     private val significant=object:TriggerEventListener(){override fun onTrigger(event:TriggerEvent){moving=true;armMotion();scope.launch{record()}}}
     private fun armMotion(){sensors.getDefaultSensor(Sensor.TYPE_SIGNIFICANT_MOTION)?.let{runCatching{sensors.requestTriggerSensor(significant,it)}}}
@@ -51,12 +52,12 @@ class SensingService:Service(),SensorEventListener {
             if(Build.VERSION.SDK_INT>=34) startForeground(8601,notice,ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH) else startForeground(8601,notice)
         } catch(_:SecurityException) {WatchRuntime.status.value="系统未允许后台感知，请在应用内开启";stopSelf();return START_NOT_STICKY}
         WatchRuntime.sensing.value=true;prefs.edit().putBoolean("wanted",true).apply()
-        if(activity) register(Sensor.TYPE_STEP_COUNTER,60000000)
+        ensureStepSensor()
         register(Sensor.TYPE_LOW_LATENCY_OFFBODY_DETECT,0)
         register(Sensor.TYPE_MOTION_DETECT,0)
         armMotion()
         // Local sensing must not wait for a Bluetooth timeout or a long synchronization backlog.
-        scope.launch { while(isActive) { record();delay(30000) } }
+        scope.launch { while(isActive) { ensureStepSensor();record();delay(30000) } }
         scope.launch { while(isActive) { withContext(Dispatchers.IO) {WatchRuntime.run(this@SensingService)};delay(30000) } }
         scope.launch { while(isActive) {
             if(sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)!=null)moving=false
@@ -65,9 +66,15 @@ class SensingService:Service(),SensorEventListener {
             sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let{sensors.unregisterListener(this@SensingService,it)}
             delay(290000)
         } }
-        if(!body)heartStatus="permission_missing"
-        else if(sensors.getDefaultSensor(Sensor.TYPE_HEART_RATE)==null)heartStatus="unavailable"
-        else scope.launch { while(isActive) {
+        scope.launch { while(isActive) {
+            // Permissions can be granted from the diagnostic page after this service started.
+            // Never freeze the initial permission snapshot for the lifetime of sensing.
+            if(ContextCompat.checkSelfPermission(this@SensingService,android.Manifest.permission.BODY_SENSORS)!=0) {
+                heartStatus="permission_missing";delay(5000);continue
+            }
+            if(sensors.getDefaultSensor(Sensor.TYPE_HEART_RATE)==null) {
+                heartStatus="unavailable";delay(300000);continue
+            }
             // A short warm-up may not produce a reliable optical reading. Allow up to 30s,
             // stop early on a valid reading, then stay off. Resample before the 10min expiry.
             val before=reducer.state.heartRateAt
@@ -87,6 +94,10 @@ class SensingService:Service(),SensorEventListener {
         val sensor=sensors.getDefaultSensor(type)?:return false
         return runCatching {sensors.registerListener(this,sensor,SensorManager.SENSOR_DELAY_NORMAL,batch)}
             .getOrDefault(false).also {if(!it)WatchRuntime.status.value="部分传感器未开放或权限不足"}
+    }
+    private fun ensureStepSensor() {
+        val allowed=Build.VERSION.SDK_INT<29 || ContextCompat.checkSelfPermission(this,android.Manifest.permission.ACTIVITY_RECOGNITION)==0
+        if(!stepRegistered && allowed)stepRegistered=register(Sensor.TYPE_STEP_COUNTER,60000000)
     }
     override fun onSensorChanged(event:SensorEvent) {
         when(event.sensor.type) {
