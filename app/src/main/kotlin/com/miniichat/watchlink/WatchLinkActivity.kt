@@ -41,6 +41,11 @@ class WatchLinkActivity:ComponentActivity() {
         var busy by remember{mutableStateOf(false)}
         var peers by remember{mutableStateOf(emptyList<android.bluetooth.BluetoothDevice>())}
         val status by PhoneLink.status.collectAsState()
+        var delivery by remember{mutableStateOf("")}
+        LaunchedEffect(enabled) {while(isActive){
+            delivery=withContext(Dispatchers.IO){PhoneLink.deliveryStatus(this@WatchLinkActivity)}
+            delay(5000)
+        }}
         val prefs=remember{getSharedPreferences("watch_link_ui",0)}
         var digital by remember{mutableStateOf(prefs.getBoolean("digital_context",false))}
         LaunchedEffect(permissionRevision){chats=ConversationStore(this@WatchLinkActivity).snapshot();peers=runCatching{BluetoothLink.peers(this@WatchLinkActivity)}.getOrDefault(emptyList())}
@@ -77,6 +82,10 @@ class WatchLinkActivity:ComponentActivity() {
                     Text("10 分钟内有效，仅一次。重新生成会撤销旧连接。",style=MaterialTheme.typography.bodySmall)
                 }
                 Text(status,style=MaterialTheme.typography.bodyMedium)
+                AppGroup { Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                    Text("身体数据传递状态",style=MaterialTheme.typography.titleSmall)
+                    Text(delivery,style=MaterialTheme.typography.bodySmall)
+                } }
                 if(error.isNotBlank())Text(error,color=MaterialTheme.colorScheme.error)
                 if(enabled) {
                     TextButton({config.enabled(false);enabled=false;code="";stopService(Intent(this@WatchLinkActivity,PhoneLinkService::class.java))}){Text("暂停连接")}

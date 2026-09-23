@@ -135,9 +135,12 @@ class WatchActivity:ComponentActivity() {
         if(profile.toString()!=headerProfile){headerProfile=profile.toString();applyProfile(profile)}
         messages.removeAllViews()
         LinkStore(this).use {store->
-            store.items("context").lastOrNull{it.getString("id")=="watch"}?.getJSONObject("body")?.let {b->
-                messages.addView(label("记录步数 ${b.optLong("dailySteps")} · 心率 ${if(b.isNull("heartRate"))"未知" else b.optString("heartRate")}\n${if(WatchRuntime.sensing.value)"感知中" else "感知已暂停"}",12f))
-            }
+            val confirmed=store.items("context").lastOrNull{it.getString("id")=="watch" && !it.optBoolean("deleted")}?.getJSONObject("body")
+            val local=store.writableDatabase.rawQuery("SELECT body FROM outbox WHERE kind='context' AND id='watch'",null).use{cursor->if(cursor.moveToFirst())JSONObject(cursor.getString(0)) else null}
+            val latest=local?:confirmed
+            messages.addView(label(DeviceContextText.watch(latest,System.currentTimeMillis())+"\n"+
+                (if(WatchRuntime.sensing.value)"感知中" else "感知已暂停")+"\n"+
+                (if(local!=null)"新身体记录待同步到手机" else if(confirmed!=null)"身体记录已由手机同步确认" else "尚无身体采集记录"),12f))
             // Confirmed items and still-queued outbox messages are merged by id so nothing looks lost while offline.
             val queued=store.outgoing().let {ops->(0 until ops.length()).map{ops.getJSONObject(it)}}.filter {it.optString("kind")=="message" && !it.optBoolean("deleted")}.map {it.getJSONObject("body")}
             val queuedIds=queued.map{messageKey(it)}.toSet()

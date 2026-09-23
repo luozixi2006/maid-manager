@@ -29,7 +29,17 @@ class SensorCheckActivity:ComponentActivity(),SensorEventListener {
         for(type in types)sensors.getDefaultSensor(type)?.let{sensor->runCatching{sensors.registerListener(this,sensor,SensorManager.SENSOR_DELAY_NORMAL)}.onFailure{values[type]="权限未允许"}}
         handler.postDelayed(stop,20000);show()
     }
-    override fun onSensorChanged(event:SensorEvent){values[event.sensor.type]=if(event.sensor.type==Sensor.TYPE_LOW_LATENCY_OFFBODY_DETECT){if(event.values[0]>0)"佩戴中" else "未佩戴"} else event.values.take(3).joinToString{String.format("%.1f",it)};show()}
+    override fun onSensorChanged(event:SensorEvent){
+        values[event.sensor.type]=when(event.sensor.type) {
+            Sensor.TYPE_LOW_LATENCY_OFFBODY_DETECT->if(event.values[0]>0)"佩戴中" else "未佩戴"
+            Sensor.TYPE_HEART_RATE->String.format("%.1f",event.values[0])+when {
+                event.accuracy==SensorManager.SENSOR_STATUS_UNRELIABLE->"（传感器标为不可靠，感知服务不会采用）"
+                event.values[0] !in 30f..220f->"（超出有效范围，感知服务不会采用）"
+                else->"（有效读数；此检查不参与同步）"
+            }
+            else->event.values.take(3).joinToString{String.format("%.1f",it)}
+        };show()
+    }
     private fun show(){text.text="本机传感器检查\n仅本地显示，不上传\n\n"+types.mapIndexed{i,type->names[i]+"："+(if(sensors.getDefaultSensor(type)==null)"设备未开放" else values[type]?:"可用，等待授权/读数")}.joinToString("\n")}
     override fun onAccuracyChanged(sensor:Sensor?,accuracy:Int)=Unit
     override fun onStop(){handler.removeCallbacks(stop);sensors.unregisterListener(this);super.onStop()}

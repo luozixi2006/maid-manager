@@ -75,6 +75,7 @@ object PhoneHub {
                                 if(kind=="event") require(value.optString("summary").length in 1..800 && value.optLong("at") in 1..System.currentTimeMillis()+300000)
                                 if(kind=="event" && known!=null && known.getJSONObject("body").toString()!=value.toString())throw LinkFailure(409,"已保存的事件不可改写")
                                 val revision=db.put(channel,kind,id,value);db.ack(channel,opId,revision);ack.put(opId);revisions.put(opId,revision)
+                                if(kind=="context")db.meta("watch-received:$channel",System.currentTimeMillis().toString())
                                 if(kind=="event")db.queue(channel,"event-$id",JSONObject().put("event_id",id))
                             }
                             else->throw LinkFailure(400,"手表无权修改这种数据")
