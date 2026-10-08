@@ -130,6 +130,11 @@ fun SettingsScreen(
 
             SettingsSection(stringResource(R.string.section_personalization)) {
                 SettingsEntry(
+                    title = "消息通知",
+                    subtitle = "电脑推送 · 锁屏提醒 · 安静时段",
+                    onClick = onOpenProactiveMessages
+                )
+                SettingsEntry(
                     title = stringResource(R.string.setting_appearance),
                     subtitle = when (settings.themeMode) {
                         "light" -> stringResource(R.string.appearance_light)
