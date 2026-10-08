@@ -165,6 +165,11 @@ android {
 dependencies {
     implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
     implementation("com.google.firebase:firebase-messaging")
+    constraints {
+        implementation("androidx.fragment:fragment:1.6.2") {
+            because("FCM brings Fragment 1.1.0; existing ActivityResult permission flows require 1.3.0 or later")
+        }
+    }
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
     implementation(project(":companion-core"))
     val composeBom = platform("androidx.compose:compose-bom:2024.09.02")
