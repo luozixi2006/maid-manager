@@ -44,6 +44,7 @@ object PhoneLink {
         .put("createdAt",message.createdAt).put("isProactive",message.isProactive).put("personaId",message.personaId)
         .put("truncated",message.content.length>12000).put("attachment_names",org.json.JSONArray(message.attachments.map{it.name}))
     suspend fun mirror(context:Context,conversation:Conversation)=mirrorMutex.withLock {
+        com.miniichat.proactive.remote.RemotePushRuntime.enqueue(context)
         // A caller snapshot can predate a watch import. Never tombstone from a stale snapshot.
         val config=LinkConfig(context)
         if(!config.enabled || config.conversationId!=conversation.id)return@withLock

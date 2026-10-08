@@ -58,7 +58,12 @@ fun ProactiveMessagesScreen(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Text("是否主动联系、聊什么，跟随各个人设。这里仅设置免打扰，不需要另外开启总开关。", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "是否主动联系、聊什么，跟随各个人设；不需要另外开启总开关。这里可以设置免打扰，也可以让角色主动消息交给自己的电脑推送。",
+                style = MaterialTheme.typography.bodyMedium
+            )
+
+            RemotePushSettings()
 
             Text(stringResource(R.string.do_not_disturb), style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

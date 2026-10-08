@@ -1,10 +1,14 @@
 package com.miniichat.proactive
 
 import android.app.Application
+import android.app.Notification
+import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.drawable.BitmapDrawable
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import com.miniichat.tasks.PetMessages
@@ -95,5 +99,62 @@ class ProactiveNotificationsTest {
         val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(shadowOf(manager).getNotification(id))!!
         assertEquals("小夏", style.messages.single().person!!.name.toString())
         assertNotNull(style.messages.single().person!!.icon)
+    }
+
+    @Test fun ensureChannelCreatesHighImportanceChannelWithVibrationAndDefaultSound() {
+        assertNull(manager.getNotificationChannel("character_messages"))
+        ProactiveNotifications.ensureChannel(context)
+        val channel = manager.getNotificationChannel("character_messages")!!
+        assertEquals("角色消息", channel.name.toString())
+        assertEquals("人物主动发来的消息", channel.description)
+        assertEquals(NotificationManager.IMPORTANCE_HIGH, channel.importance)
+        assertTrue(channel.shouldVibrate())
+        assertArrayEquals(longArrayOf(0, 180, 100, 180), channel.vibrationPattern)
+        assertEquals(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION), channel.sound)
+        assertEquals(AudioAttributes.USAGE_NOTIFICATION, channel.audioAttributes.usage)
+        assertEquals(AudioAttributes.CONTENT_TYPE_SONIFICATION, channel.audioAttributes.contentType)
+        assertEquals(Notification.VISIBILITY_PRIVATE, channel.lockscreenVisibility)
+        ProactiveNotifications.ensureChannel(context)
+        assertSame(channel, manager.getNotificationChannel("character_messages"))
+    }
+
+    @Test fun existingSilentLowImportanceChannelSurvivesEnsureChannelAndPublish() {
+        val existing = NotificationChannel("character_messages", "静音", NotificationManager.IMPORTANCE_LOW).apply {
+            enableVibration(false)
+            setSound(null, null)
+        }
+        manager.createNotificationChannel(existing)
+        ProactiveNotifications.ensureChannel(context)
+        ProactiveNotifications.publish(context, "小夏", "你好", null, destination)
+        val after = manager.getNotificationChannel("character_messages")!!
+        assertSame(existing, after)
+        assertEquals("静音", after.name.toString())
+        assertEquals(NotificationManager.IMPORTANCE_LOW, after.importance)
+        assertFalse(after.shouldVibrate())
+        assertNull(after.vibrationPattern)
+        assertNull(after.sound)
+        assertNotNull(shadowOf(manager).getNotification(id))
+    }
+
+    @Test fun publicVersionRedactsCharacterNameBodyAndConversation() {
+        ProactiveNotifications.publish(context, "小夏", "秘密内容", null, destination)
+        val notification = shadowOf(manager).getNotification(id)!!
+        assertEquals(NotificationCompat.VISIBILITY_PRIVATE, notification.visibility)
+        val publicVersion = notification.publicVersion
+        assertNotNull(publicVersion)
+        val extras = publicVersion.extras
+        assertEquals("女仆管理器", extras.getCharSequence(Notification.EXTRA_TITLE)?.toString())
+        assertEquals("你收到一条角色消息", extras.getCharSequence(Notification.EXTRA_TEXT)?.toString())
+        val flattened = extras.keySet().joinToString("\n") { "$it=" + extras.get(it) }
+        assertFalse(flattened.contains("小夏"))
+        assertFalse(flattened.contains("秘密内容"))
+        assertFalse(flattened.contains("conversation-1"))
+        assertNull(publicVersion.contentIntent)
+    }
+
+    @Test fun notificationIsNotLocalOnlySoOsCompanionBridgesCanRelayIt() {
+        ProactiveNotifications.publish(context, "小夏", "你好", null, destination)
+        val notification = shadowOf(manager).getNotification(id)!!
+        assertEquals(0, notification.flags and Notification.FLAG_LOCAL_ONLY)
     }
 }

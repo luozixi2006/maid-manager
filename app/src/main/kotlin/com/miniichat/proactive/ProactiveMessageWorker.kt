@@ -51,6 +51,10 @@ class ProactiveMessageWorker(
 
     override suspend fun doWork(): Result = CompanionContactGate.mutex.withLock { execute() }
     private suspend fun execute(): Result {
+        if (!manual && com.miniichat.proactive.remote.RemotePushConfig(applicationContext).enabled) {
+            com.miniichat.proactive.remote.RemotePushRuntime.enqueue(applicationContext)
+            return Result.success()
+        }
         val settingsRepository = SettingsRepository(applicationContext)
         val settings = settingsRepository.settings.first()
         val now = System.currentTimeMillis()
@@ -225,6 +229,7 @@ class ProactiveMessageWorker(
                 assistantStore.update(assistant.id) { it.withNext(settings, 0.2) }; return
             }
             val latestAssistant = assistantStore.snapshot().firstOrNull { it.id == assistant.id } ?: return
+            if (!manual && com.miniichat.proactive.remote.RemotePushConfig(applicationContext).enabled) return
             if (!latestAssistant.canContact(settingsRepository.settings.first().proactiveMessagesEnabled)) return
             // Don't insert an unsolicited message over a conversation the user has just resumed.
             if (conversation != null && conversationStore.snapshot().firstOrNull { it.id == conversation.id }?.updatedAt != conversation.updatedAt) {

@@ -1,6 +1,7 @@
 package com.miniichat.proactive
 
 import android.Manifest
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -10,6 +11,8 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
@@ -50,6 +53,8 @@ object ProactiveNotifications {
     const val EXTRA_SOURCE = "proactive_source"
     const val EXTRA_CONVERSATION = "proactive_conversation_id"
     private const val CHANNEL_ID = "character_messages"
+    private const val PUBLIC_TITLE = "女仆管理器"
+    private const val PUBLIC_TEXT = "你收到一条角色消息"
 
     fun blockedReason(context: Context): String? {
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context,
@@ -73,12 +78,35 @@ object ProactiveNotifications {
         }
     }
 
+    /**
+     * Creates the character message channel when it does not exist yet. An existing channel is
+     * left untouched so user choices (importance, sound, vibration) are never overridden.
+     */
+    fun ensureChannel(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = context.getSystemService(NotificationManager::class.java)
+        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        val channel = NotificationChannel(CHANNEL_ID, "角色消息", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "人物主动发来的消息"
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 180, 100, 180)
+            setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION), audioAttributes)
+            lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+        }
+        manager.createNotificationChannel(channel)
+    }
+
     fun publish(
         context: Context,
         characterName: String,
         message: String,
         avatarPath: String?,
-        destination: ProactiveDestination
+        destination: ProactiveDestination,
+        deliveryId: String? = null
     ): Boolean {
         com.miniichat.tasks.PetMessages.show("$characterName：$message", destination.conversationId)
         if (AppVisibility.isForeground) {
@@ -86,16 +114,7 @@ object ProactiveNotifications {
         }
         if (blockedReason(context) != null) return false
 
-        val manager = context.getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "角色消息",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply { description = "人物主动发来的消息" }
-            )
-        }
+        ensureChannel(context)
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra(EXTRA_SOURCE, destination.sourceType)
@@ -125,12 +144,22 @@ object ProactiveNotifications {
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setLocalOnly(false)
+            .setOnlyAlertOnce(deliveryId != null)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .setLargeIcon(avatar)
+            .setPublicVersion(NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_dialog_email)
+                .setContentTitle(PUBLIC_TITLE)
+                .setContentText(PUBLIC_TEXT)
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                .setAutoCancel(true)
+                .build())
             .build()
         return try {
-            NotificationManagerCompat.from(context).notify(requestCode, notification)
+            val notificationId = deliveryId?.let { "remote:$it".hashCode() } ?: requestCode
+            NotificationManagerCompat.from(context).notify(notificationId, notification)
             true
         } catch (_: SecurityException) {
             // Permission can be revoked between checking it and posting; the conversation is already saved.

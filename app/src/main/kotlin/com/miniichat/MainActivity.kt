@@ -2,6 +2,12 @@ package com.miniichat
 
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
+import com.miniichat.proactive.remote.RemotePushRuntime
 
 import android.content.Context
 import android.content.Intent
@@ -46,8 +52,10 @@ class MainActivity : ComponentActivity() {
         return base.createConfigurationContext(cfg)
     }
 
+    @OptIn(kotlinx.coroutines.FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ProactiveNotifications.ensureChannel(this)
         enableEdgeToEdge()
         setContent {
             val s by vm.settings.collectAsState()
@@ -61,6 +69,16 @@ class MainActivity : ComponentActivity() {
             }
         }
         handleProactiveIntent(intent)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                merge(
+                    com.miniichat.data.ConversationStore(this@MainActivity).conversationsFlow.map { Unit },
+                    com.miniichat.data.AssistantStore(this@MainActivity).assistantsFlow.map { Unit },
+                    com.miniichat.data.ProviderStore(this@MainActivity).providersFlow.map { Unit },
+                    com.miniichat.data.SettingsRepository(this@MainActivity).settings.map { Unit }
+                ).debounce(1500).collect { RemotePushRuntime.enqueue(this@MainActivity) }
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -80,9 +98,14 @@ class MainActivity : ComponentActivity() {
         }
         AppVisibility.isForeground = true
         com.miniichat.watchlink.PhoneLink.startIfEnabled(this)
+        if (com.miniichat.proactive.remote.RemotePushConfig(this).enabled) {
+            com.miniichat.proactive.remote.PushInboxWorker.enqueue(this)
+        }
+        if (com.miniichat.proactive.remote.RemotePushConfig(this).paired) RemotePushRuntime.schedule(this)
     }
 
     override fun onStop() {
+        RemotePushRuntime.enqueue(this)
         AppVisibility.isForeground = false
         super.onStop()
     }

@@ -1,0 +1,4 @@
+# Isolated runtime in server/.venv. No Firebase Analytics or cloud database SDK.
+cryptography==50.0.2
+google-auth==2.61.0
+requests==2.34.2

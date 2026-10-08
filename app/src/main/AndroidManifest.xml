@@ -4,6 +4,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
@@ -39,6 +40,20 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MaidManager"
         android:enableOnBackInvokedCallback="true">
+
+        <!-- Only Messaging is included. Never add Analytics/Crashlytics for push delivery. -->
+        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
+        <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
+        <meta-data android:name="firebase_analytics_collection_deactivated" android:value="true" />
+        <meta-data android:name="firebase_data_collection_default_enabled" android:value="false" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="character_messages" />
+
+        <service android:name="com.miniichat.proactive.remote.MaidMessagingService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
 
         <activity android:name="com.miniichat.watchlink.WatchLinkActivity" android:exported="false" />
         <service android:name="com.miniichat.watchlink.PhoneLinkService" android:exported="false" android:foregroundServiceType="connectedDevice|remoteMessaging" />

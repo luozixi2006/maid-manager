@@ -3,7 +3,16 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("com.google.gms.google-services") apply false
 }
+
+// Open-source builds remain usable without this installation's Firebase project.
+// Release CI must supply google-services.json separately for push-enabled builds.
+val firebaseConfigured = file("google-services.json").isFile
+require(providers.gradleProperty("REQUIRE_PUSH_CONFIG").orNull != "true" || firebaseConfigured) {
+    "This release requires the Android Firebase client configuration"
+}
+if (firebaseConfigured) apply(plugin = "com.google.gms.google-services")
 
 val suppliedVersionCode = providers.gradleProperty("BUILD_VERSION_CODE").orNull
 val buildVersionCode = when {
@@ -36,6 +45,7 @@ android {
         targetSdk = 34
         versionCode = buildVersionCode
         versionName = buildVersionName
+        buildConfigField("boolean", "PUSH_CONFIGURED", firebaseConfigured.toString())
         vectorDrawables { useSupportLibrary = true }
 
         val updateOwner = updateSlug("UPDATE_GITHUB_OWNER")
@@ -153,6 +163,8 @@ android {
 }
 
 dependencies {
+    implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
+    implementation("com.google.firebase:firebase-messaging")
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
     implementation(project(":companion-core"))
     val composeBom = platform("androidx.compose:compose-bom:2024.09.02")

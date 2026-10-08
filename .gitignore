@@ -25,6 +25,18 @@ signing.properties
 !.env.example
 secrets.properties
 
+# Local Firebase client configuration and private push server state.
+# Release CI receives client configuration separately; server credentials never enter APKs.
+google-services.json
+**/google-services.json
+**/*service-account*.json
+server/.secrets/
+server/data/
+server/.venv/
+server/logs/
+__pycache__/
+*.pyc
+
 # Generated packages, reports, logs and local data
 *.apk
 *.aab
