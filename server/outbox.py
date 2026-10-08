@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sqlite3
+import time
 import uuid
 
 # Largest timestamp we accept so that derived timestamps cannot overflow the
@@ -84,6 +85,18 @@ class Outbox:
             os.makedirs(parent, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            columns = {row[1] for row in conn.execute('PRAGMA table_info(outbox)')}
+            for name, declaration in {
+                'first_fcm_at': 'INTEGER NOT NULL DEFAULT 0',
+                'last_fcm_at': 'INTEGER NOT NULL DEFAULT 0',
+                'acked_at': 'INTEGER NOT NULL DEFAULT 0',
+                'fcm_receipt': "TEXT NOT NULL DEFAULT ''",
+                'transport': "TEXT NOT NULL DEFAULT 'data'",
+                'received_via': "TEXT NOT NULL DEFAULT ''",
+                'delivery_outcome': "TEXT NOT NULL DEFAULT ''",
+            }.items():
+                if name not in columns:
+                    conn.execute(f'ALTER TABLE outbox ADD COLUMN {name} {declaration}')
 
     # -- internals ---------------------------------------------------------
     @contextlib.contextmanager
@@ -160,15 +173,20 @@ class Outbox:
             ).fetchall()
         return [{"seq": r[0], "envelope": json.loads(r[1])} for r in rows]
 
-    def ack(self, device_id: str, message_id: str) -> bool:
+    def ack(self, device_id: str, message_id: str, *, source='', outcome='') -> bool:
         _text(device_id, "device_id")
         _text(message_id, "message_id")
+        if source not in ('', 'legacy', 'fcm', 'notification_tap', 'sync') or outcome not in ('', 'notified', 'saved_silent', 'blocked', 'discarded'):
+            raise ValueError('invalid_receipt')
         with self._connect() as conn:
             with self._tx(conn):
                 cur = conn.execute(
-                    "UPDATE outbox SET acked=1, lease_id='', lease_until=0"
+                    "UPDATE outbox SET acked=1, lease_id='', lease_until=0,"
+                    " acked_at=CASE WHEN acked_at=0 THEN ? ELSE acked_at END,"
+                    " received_via=CASE WHEN received_via='' THEN ? ELSE received_via END,"
+                    " delivery_outcome=CASE WHEN delivery_outcome='' THEN ? ELSE delivery_outcome END"
                     " WHERE device_id=? AND message_id=?",
-                    (device_id, message_id),
+                    (int(time.time()*1000), source, outcome, device_id, message_id),
                 )
                 return cur.rowcount == 1
 
@@ -206,33 +224,38 @@ class Outbox:
                             "seq": seq,
                             "device_id": row[0],
                             "envelope": json.loads(row[1]),
+                            "message_id": json.loads(row[1])['message_id'],
                             "lease_id": lease_id,
                             "attempts": row[2],
                         }
                     )
                 return claimed
 
-    def sent(self, seq: int, lease_id: str, now: int) -> bool:
+    def sent(self, seq: int, lease_id: str, now: int, *, receipt='', transport='data') -> bool:
         seq = _int(seq, "seq", 0)
         _text(lease_id, "lease_id")
         now = _int(now, "now", 0)
+        if transport not in ('data', 'system') or not isinstance(receipt, str) or len(receipt) > 512:
+            raise ValueError('invalid_transport_receipt')
         next_attempt = _add(now, _SENT_BACKOFF_MS, "next_attempt")
         with self._connect() as conn:
             with self._tx(conn):
                 cur = conn.execute(
-                    "UPDATE outbox SET next_attempt=?, lease_id='',"
-                    " lease_until=0, last_error=''"
+                    "UPDATE outbox SET next_attempt=CASE WHEN ?='system' THEN expires ELSE ? END, lease_id='',"
+                    " lease_until=0, last_error='', first_fcm_at=CASE WHEN first_fcm_at=0 THEN ? ELSE first_fcm_at END,"
+                    " last_fcm_at=?, fcm_receipt=?, transport=?"
                     " WHERE seq=? AND lease_id=? AND acked=0 AND lease_until>?",
-                    (next_attempt, seq, lease_id, now),
+                    (transport, next_attempt, now, now, receipt, transport, seq, lease_id, now),
                 )
                 return cur.rowcount == 1
 
-    def failed(self, seq: int, lease_id: str, now: int, code: str) -> bool:
+    def failed(self, seq: int, lease_id: str, now: int, code: str, *, retry_after=0) -> bool:
         seq = _int(seq, "seq", 0)
         _text(lease_id, "lease_id")
         now = _int(now, "now", 0)
         if not isinstance(code, str) or _CODE_RE.fullmatch(code) is None:
             raise ValueError("invalid code")
+        retry_after = _int(retry_after, 'retry_after', 0, 3600)
         with self._connect() as conn:
             with self._tx(conn):
                 row = conn.execute(
@@ -243,7 +266,7 @@ class Outbox:
                 if row is None:
                     return False
                 shift = min(max(row[0] - 1, 0), _MAX_BACKOFF_SHIFT)
-                delay = min(_MAX_BACKOFF_MS, _BASE_BACKOFF_MS * (2 ** shift))
+                delay = max(retry_after * 1000, min(_MAX_BACKOFF_MS, _BASE_BACKOFF_MS * (2 ** shift)))
                 next_attempt = _add(now, delay, "next_attempt")
                 conn.execute(
                     "UPDATE outbox SET next_attempt=?, lease_id='',"

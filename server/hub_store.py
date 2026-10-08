@@ -120,6 +120,15 @@ class HubStore:
         self._outbox = Outbox(path)
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            columns = {row[1] for row in conn.execute('PRAGMA table_info(devices)')}
+            for name, declaration in {
+                'system_notification': 'INTEGER NOT NULL DEFAULT 0',
+                'token_updated_at': 'INTEGER NOT NULL DEFAULT 0',
+                'token_error': "TEXT NOT NULL DEFAULT ''",
+                'invalid_token_hash': "TEXT NOT NULL DEFAULT ''",
+            }.items():
+                if name not in columns:
+                    conn.execute(f'ALTER TABLE devices ADD COLUMN {name} {declaration}')
 
     # -- internals ---------------------------------------------------------
     @contextlib.contextmanager
@@ -217,7 +226,7 @@ class HubStore:
             return None
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT device_id, payload_key, fcm_token, active FROM devices"
+                "SELECT device_id, payload_key, fcm_token, active, system_notification, token_error FROM devices"
                 " WHERE device_id=?",
                 (device_id,),
             ).fetchone()
@@ -228,21 +237,37 @@ class HubStore:
             "payload_key": row[1],
             "fcm_token": row[2],
             "active": row[3],
+            "system_notification": bool(row[4]),
+            "token_error": row[5],
         }
 
-    def register(self, device_id: str, token: str) -> None:
+    def register(self, device_id: str, token: str, *, system_notification=False, now=0) -> None:
         """Store a bounded FCM token for an existing device."""
         _text(device_id, "device_id")
         if not isinstance(token, str) or _FCM_RE.fullmatch(token) is None:
             raise ValueError("invalid token")
+        if not isinstance(system_notification, bool):
+            raise ValueError('invalid_transport')
+        now = _int(now, 'now', 0)
         with self._connect() as conn:
             with self._tx(conn):
                 cur = conn.execute(
-                    "UPDATE devices SET fcm_token=? WHERE device_id=?",
-                    (token, device_id),
+                    "UPDATE devices SET system_notification=?, token_updated_at=?,"
+                    " fcm_token=CASE WHEN invalid_token_hash=? THEN '' ELSE ? END,"
+                    " token_error=CASE WHEN invalid_token_hash=? THEN token_error ELSE '' END"
+                    " WHERE device_id=?",
+                    (int(system_notification), now, _sha256(token), token, _sha256(token), device_id),
                 )
                 if cur.rowcount != 1:
                     raise ValueError("unknown_device")
+
+    def invalidate_token(self, device_id: str, expected_token: str, code: str) -> bool:
+        """CAS: a delayed failure must never erase a newer token registered concurrently."""
+        if code not in ('fcm_token_unregistered', 'fcm_token_invalid'):
+            raise ValueError('invalid_token_error')
+        with self._connect() as conn:
+            return conn.execute("UPDATE devices SET fcm_token='', invalid_token_hash=?, token_error=?"
+                " WHERE device_id=? AND fcm_token=?", (_sha256(expected_token), code, device_id, expected_token)).rowcount == 1
 
     # -- profiles ----------------------------------------------------------
     def snapshot(self, device_id: str, profiles: list, now: int) -> None:

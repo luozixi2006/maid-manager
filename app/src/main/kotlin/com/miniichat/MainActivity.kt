@@ -111,6 +111,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleProactiveIntent(intent: Intent?) {
+        com.miniichat.proactive.remote.PushIngress.takeIntentData(intent)?.let { data ->
+            lifecycleScope.launch {
+                runCatching { com.miniichat.proactive.remote.PushIngress.opened(this@MainActivity, data) }
+                    .onSuccess { destination -> destination?.let(ProactiveNavigation::open) }
+                    .onFailure { com.miniichat.proactive.remote.PushTrace.record(this@MainActivity, "notification_open_failed") }
+            }
+        }
         if (intent?.getBooleanExtra("phone_tasks", false) == true) {
             com.miniichat.tasks.TaskNavigation.selectedTask.value = intent.getStringExtra("work_task_id").orEmpty()
             com.miniichat.tasks.TaskNavigation.open.value = true

@@ -23,6 +23,7 @@ class RemotePushConfig(context: Context) {
     val status get() = prefs.getString("status", "尚未连接电脑推送服务").orEmpty()
     val shareModelKey get() = prefs.getBoolean("share_model_key", false)
     val pausePending get() = prefs.getBoolean("pause_pending", false)
+    val tokenCheckedAt get() = prefs.getLong("token_checked_at", 0L)
     fun pausePending(value: Boolean) { check(prefs.edit().putBoolean("pause_pending", value).commit()) }
     fun enabled(value: Boolean) { check(prefs.edit().putBoolean("enabled", value).commit()) }
     fun cursor(value: Long) { require(value >= 0); check(prefs.edit().putLong("cursor", value).commit()) }
@@ -47,7 +48,7 @@ class RemotePushConfig(context: Context) {
     fun fcmToken(): String = prefs.getString("fcm_token", null)?.let(::open).orEmpty()
     fun fcmToken(value: String) {
         require(value.isNotBlank() && value.length <= 4096)
-        check(prefs.edit().putString("fcm_token", seal(value)).commit())
+        check(prefs.edit().putString("fcm_token", seal(value)).putLong("token_checked_at", System.currentTimeMillis()).commit())
     }
     private fun credentials(): JSONObject = try {
         JSONObject(open(prefs.getString("credentials", "").orEmpty()))

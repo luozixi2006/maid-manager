@@ -8,7 +8,7 @@ import org.json.JSONObject
 import java.io.Closeable
 
 private const val DB_NAME = "remote_push_inbox.db"
-private const val DB_VERSION = 1
+private const val DB_VERSION = 2
 private const val TABLE_PUSH_INBOX = "push_inbox"
 private const val COL_DEVICE_ID = "device_id"
 private const val COL_MESSAGE_ID = "message_id"
@@ -50,8 +50,9 @@ class PushInbox(context: Context) : Closeable {
      * @throws IllegalArgumentException when the same message id exists with different content.
      * @throws IllegalStateException when the device already holds [MAX_UNFINISHED] unfinished rows.
      */
-    fun offer(deviceId: String, envelope: PushEnvelope, receivedAt: Long): Boolean {
+    fun offer(deviceId: String, envelope: PushEnvelope, receivedAt: Long, source: String = "legacy", allowAlert: Boolean = true): Boolean {
         validateDeviceId(deviceId)
+        require(source in setOf("legacy", "fcm", "notification_tap", "sync"))
         if (receivedAt < 0L) throw IllegalArgumentException("invalid_received_at")
 
         val db = helper.writableDatabase
@@ -78,6 +79,8 @@ class PushInbox(context: Context) : Closeable {
                 put(COL_ENVELOPE, serialize(envelope))
                 put(COL_RECEIVED_AT, receivedAt)
                 put(COL_FINISHED, 0)
+                put("source", source)
+                put("allow_alert", if (allowAlert) 1 else 0)
             }
             db.insertOrThrow(TABLE_PUSH_INBOX, null, values)
             db.setTransactionSuccessful()
@@ -112,9 +115,10 @@ class PushInbox(context: Context) : Closeable {
     }
 
     /** Marks an envelope finished; idempotent, never deletes. Returns true if the row exists. */
-    fun finish(deviceId: String, messageId: String): Boolean {
+    fun finish(deviceId: String, messageId: String, outcome: String = "saved_silent"): Boolean {
         validateDeviceId(deviceId)
-        val values = ContentValues().apply { put(COL_FINISHED, 1) }
+        require(outcome in setOf("notified", "saved_silent", "blocked", "discarded"))
+        val values = ContentValues().apply { put(COL_FINISHED, 1); put("outcome", outcome) }
         val updated = helper.writableDatabase.update(
             TABLE_PUSH_INBOX,
             values,
@@ -150,6 +154,21 @@ class PushInbox(context: Context) : Closeable {
             "SELECT message_id FROM push_inbox WHERE device_id=? AND finished=1 AND acked=0 ORDER BY rowid LIMIT 100",
             arrayOf(deviceId)
         ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getString(0)) } }
+    }
+
+    fun allowAlert(deviceId: String, messageId: String): Boolean = helper.readableDatabase.rawQuery(
+        "SELECT allow_alert FROM push_inbox WHERE device_id=? AND message_id=?", arrayOf(deviceId, messageId)
+    ).use { it.moveToFirst() && it.getInt(0) == 1 }
+
+    fun receipts(deviceId: String): org.json.JSONArray {
+        validateDeviceId(deviceId)
+        return helper.readableDatabase.rawQuery(
+            "SELECT message_id,source,outcome FROM push_inbox WHERE device_id=? AND finished=1 AND acked=0 ORDER BY rowid LIMIT 100",
+            arrayOf(deviceId)
+        ).use { cursor -> org.json.JSONArray().apply {
+            while (cursor.moveToNext()) put(JSONObject().put("message_id", cursor.getString(0))
+                .put("source", cursor.getString(1)).put("outcome", cursor.getString(2)))
+        } }
     }
 
     fun acknowledged(deviceId: String, messageId: String) {
@@ -211,12 +230,19 @@ class PushInbox(context: Context) : Closeable {
                     "$COL_RECEIVED_AT INTEGER NOT NULL, " +
                     "$COL_FINISHED INTEGER NOT NULL DEFAULT 0, " +
                     "acked INTEGER NOT NULL DEFAULT 0, " +
+                    "source TEXT NOT NULL DEFAULT 'legacy', " +
+                    "allow_alert INTEGER NOT NULL DEFAULT 1, " +
+                    "outcome TEXT NOT NULL DEFAULT 'saved_silent', " +
                     "PRIMARY KEY ($COL_DEVICE_ID, $COL_MESSAGE_ID))"
             )
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            throw IllegalStateException("push_inbox_schema_upgrade_unsupported")
+            if (oldVersion < 2) {
+                db.execSQL("ALTER TABLE push_inbox ADD COLUMN source TEXT NOT NULL DEFAULT 'legacy'")
+                db.execSQL("ALTER TABLE push_inbox ADD COLUMN allow_alert INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE push_inbox ADD COLUMN outcome TEXT NOT NULL DEFAULT 'saved_silent'")
+            }
         }
     }
 

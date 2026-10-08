@@ -107,7 +107,7 @@ class AuthTests(HubStoreTestCase):
         dev = self.pair_device()
         info = self.store.device(dev["device_id"])
         self.assertEqual(
-            set(info.keys()), {"id", "payload_key", "fcm_token", "active"}
+            set(info.keys()), {"id", "payload_key", "fcm_token", "active", "system_notification", "token_error"}
         )
         self.assertIsNone(self.store.device("missing"))
 

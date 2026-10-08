@@ -50,6 +50,9 @@ fun RemotePushSettings() {
     var pausePending by remember { mutableStateOf(false) }
     var savedStatus by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<String?>(null) }
+    val notificationPermission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { allowed -> message = if (allowed) "通知权限已开启" else "通知权限未开启，锁屏提醒无法显示；可在系统通知设置中开启" }
 
     fun readConfig() {
         val config = RemotePushConfig(context.applicationContext)
@@ -110,7 +113,7 @@ fun RemotePushSettings() {
         )
         Text(
             "开启后，已启用主动联系的人设、近期聊天和所选模型的 API Key 会经 Tailscale 保存在你自己的电脑上，" +
-                "仅用于生成主动消息；不会上传身体或屏幕数据，Firebase 只收到加密消息。",
+                "仅用于生成主动消息；不会上传身体或屏幕数据。正文经加密传送，系统兜底通知只显示通用提醒。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -155,12 +158,23 @@ fun RemotePushSettings() {
             ) { Text("暂停电脑推送") }
         }
         TextButton(onClick = {
-            runCatching { context.startActivity(ProactiveNotifications.settingsIntent(context)) }
-                .onFailure { message = "请在系统应用设置中开启通知" }
+            if (android.os.Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(
+                    context, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            } else runCatching { context.startActivity(ProactiveNotifications.settingsIntent(context)) }
+                    .onFailure { message = "请在系统应用设置中开启通知" }
         }) { Text("系统通知设置") }
+        ProactiveNotifications.blockedReason(context)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         savedStatus.takeIf { it.isNotBlank() }?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+        TextButton(onClick = {
+            val report = com.miniichat.proactive.remote.PushTrace.report(context)
+            runCatching { context.startActivity(android.content.Intent.createChooser(
+                android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(android.content.Intent.EXTRA_TEXT, report), "导出推送诊断")) }
+                .onFailure { message = "没有可接收诊断报告的应用" }
+        }) { Text("导出推送诊断（不含消息内容或密钥）") }
     }
 }

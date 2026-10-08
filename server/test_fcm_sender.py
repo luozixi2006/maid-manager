@@ -1,9 +1,14 @@
+import hashlib
+import json
 import threading
 import unittest
 
 from requests.exceptions import ConnectionError
 from fcm_sender import FcmFailure, FcmSender, build_request
 from push_crypto import encrypt
+
+TAG = "maid-remote:" + hashlib.sha256(b"message-1").hexdigest()
+BAD_TAGS = ("maid-remote:" + "A" * 64, "maid-remote:" + "a" * 63, "other:" + "a" * 64, "", 123)
 
 
 class Response:
@@ -85,6 +90,76 @@ class FcmSenderTest(unittest.TestCase):
         with self.assertRaises(FcmFailure):
             sender.send("not a token", self.data)
         self.assertIsNone(sender._session.call)
+
+    def test_optional_notification_is_generic_and_correctly_tagged(self):
+        request = build_request("test-only-token", self.data, notification_tag=TAG)
+        message = request["message"]
+        self.assertEqual({"title": "女仆管理器", "body": "你收到一条角色消息，点开继续聊天"},
+                         message["notification"])
+        android = message["android"]
+        self.assertEqual("maid-character-messages", android["collapse_key"])
+        self.assertEqual("HIGH", android["priority"])
+        self.assertEqual("86400s", android["ttl"])
+        self.assertEqual("com.maidmanager.debug", android["restricted_package_name"])
+        self.assertEqual({
+            "channel_id": "character_messages",
+            "tag": TAG,
+            "default_sound": True,
+            "default_vibrate_timings": True,
+            "visibility": "PRIVATE",
+            "local_only": False,
+            "notification_priority": "PRIORITY_HIGH",
+        }, android["notification"])
+        self.assertEqual(self.data, message["data"])
+        self.assertNotIn("secret", json.dumps(request, ensure_ascii=False))
+
+    def test_unknown_notification_tag_rejected_before_network(self):
+        for bad in BAD_TAGS:
+            with self.assertRaises(FcmFailure) as failure:
+                build_request("test-only-token", self.data, notification_tag=bad)
+            self.assertEqual("invalid_notification_tag", failure.exception.code)
+        sender = self.sender(Response())
+        with self.assertRaises(FcmFailure):
+            sender.send("test-only-token", self.data, notification_tag="nope")
+        self.assertIsNone(sender._session.call)
+
+    def test_send_forwards_notification_tag(self):
+        sender = self.sender(Response())
+        sender.send("test-only-token", self.data, notification_tag=TAG)
+        message = sender._session.call[1]["json"]["message"]
+        self.assertEqual(TAG, message["android"]["notification"]["tag"])
+        self.assertEqual("maid-character-messages", message["android"]["collapse_key"])
+
+    def test_fcm_invalid_argument_maps_to_token_invalid(self):
+        response = Response(400, {"error": {"status": "INVALID_ARGUMENT", "details": [{
+            "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", "errorCode": "INVALID_ARGUMENT"
+        }]}})
+        with self.assertRaises(FcmFailure) as failure:
+            self.sender(response).send("test-only-token", self.data)
+        self.assertEqual("fcm_token_invalid", failure.exception.code)
+
+    def test_generic_bad_request_does_not_invalidate_token(self):
+        response = Response(400, {"error": {"status": "INVALID_ARGUMENT", "message": "PRIVATE", "details": [{
+            "@type": "type.googleapis.com/google.rpc.BadRequest", "fieldViolations": []
+        }]}})
+        with self.assertRaises(FcmFailure) as failure:
+            self.sender(response).send("test-only-token", self.data)
+        self.assertEqual("fcm_bad_request", failure.exception.code)
+
+    def test_sender_id_mismatch_is_distinguished(self):
+        response = Response(403, {"error": {"status": "SENDER_ID_MISMATCH", "message": "PRIVATE"}})
+        with self.assertRaises(FcmFailure) as failure:
+            self.sender(response).send("test-only-token", self.data)
+        self.assertEqual("fcm_sender_mismatch", failure.exception.code)
+
+    def test_payload_violation_never_retires_token_even_with_fcm_error(self):
+        response = Response(400, {'error': {'details': [
+            {'@type': 'type.googleapis.com/google.firebase.fcm.v1.FcmError', 'errorCode': 'INVALID_ARGUMENT'},
+            {'@type': 'type.googleapis.com/google.rpc.BadRequest', 'fieldViolations': []}
+        ]}})
+        with self.assertRaises(FcmFailure) as failure:
+            self.sender(response).send('test-only-token', self.data)
+        self.assertEqual('fcm_bad_request', failure.exception.code)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import ipaddress
 import json
 import math
@@ -22,6 +23,7 @@ from fcm_sender import FcmFailure, FcmSender
 from hub_store import HubStore
 from outbox import Outbox
 from push_crypto import encrypt
+from delivery_log import event, configure as configure_delivery_log
 
 ROOT = Path(__file__).resolve().parent
 PRIVATE = ROOT / ".secrets"
@@ -170,26 +172,40 @@ class Runtime:
                 # Validate final encrypted size before committing this exact content to history.
                 encrypt(envelope, base64.b64decode(device["payload_key"]), device["id"])
             delay = random.uniform(profile["min_minutes"], profile["max_minutes"]) * 60000
-            self.store.complete(claim, now, now + int(delay), "sent" if answer else "chose_silence", envelope)
+            committed = self.store.complete(claim, now, now + int(delay), "sent" if answer else "chose_silence", envelope)
+            if committed and envelope:
+                event('generated_saved', envelope['message_id'])
         except Exception as error:
             code = error.code if isinstance(error, FcmFailure) else "generation_failed"
             now = now_ms()
             self.store.complete(claim, now, now + 300000, code)
+            event('generation_failed', code=code)
 
     def deliver_once(self):
         for item in self.outbox.claim_due(now_ms(), limit=1, lease_ms=90000):
             now = now_ms()
+            device = None
             try:
                 device = self.store.device(item["device_id"])
                 if not device or not device["active"] or not device["fcm_token"]:
-                    self.outbox.failed(item["seq"], item["lease_id"], now, "device_paused")
+                    code = 'device_paused' if not device or not device['active'] else device['token_error'] or 'fcm_token_missing'
+                    self.outbox.failed(item["seq"], item["lease_id"], now, code)
+                    event('delivery_waiting', item['message_id'], code)
                     continue
                 data = encrypt(item["envelope"], base64.b64decode(device["payload_key"]), device["id"])
-                self.sender.send(device["fcm_token"], data)
-                self.outbox.sent(item["seq"], item["lease_id"], now_ms())
+                mode = 'system' if device['system_notification'] else 'data'
+                options = {'notification_tag': 'maid-remote:' + hashlib.sha256(item['message_id'].encode()).hexdigest()} if mode == 'system' else {}
+                event('fcm_request', item['message_id'], mode)
+                receipt = self.sender.send(device["fcm_token"], data, **options)
+                self.outbox.sent(item["seq"], item["lease_id"], now_ms(), receipt=receipt, transport=mode)
+                event('fcm_accepted', item['message_id'], mode, 200)
             except Exception as error:
                 code = error.code if isinstance(error, FcmFailure) else "delivery_failed"
-                self.outbox.failed(item["seq"], item["lease_id"], now_ms(), code)
+                if code in ('fcm_token_unregistered', 'fcm_token_invalid') and device:
+                    self.store.invalidate_token(item['device_id'], device['fcm_token'], code)
+                self.outbox.failed(item["seq"], item["lease_id"], now_ms(), code,
+                    retry_after=error.retry_after if isinstance(error, FcmFailure) else 0)
+                event('fcm_failed', item['message_id'], code, error.status if isinstance(error, FcmFailure) else 0)
 
     def loop(self, operation):
         while not self.stopping.is_set():
@@ -250,6 +266,19 @@ def handler(runtime):
                 device_id = runtime.store.authenticate(authorization[7:] if authorization.startswith("Bearer ") else "")
                 if device_id is None:
                     return self.respond(401, {"error": "pairing_required"})
+                receipts = body.get('receipts', [])
+                if not isinstance(receipts, list) or len(receipts) > 100:
+                    raise ValueError('invalid_receipts')
+                receipt_map = {}
+                for receipt in receipts:
+                    if (not isinstance(receipt, dict) or receipt.get('source') not in ('legacy', 'fcm', 'notification_tap', 'sync')
+                            or receipt.get('outcome') not in ('notified', 'saved_silent', 'blocked', 'discarded')):
+                        raise ValueError('invalid_receipt')
+                    receipt_map[text(receipt.get('message_id'), 128)] = receipt
+                def acknowledge(mid):
+                    receipt = receipt_map.get(mid, {})
+                    if runtime.outbox.ack(device_id, mid, source=receipt.get('source', ''), outcome=receipt.get('outcome', '')):
+                        event('device_ack', mid, receipt.get('source', 'legacy'))
                 if self.path == "/v1/pause":
                     runtime.store.pause(device_id)
                     return self.respond(200, {"paused": True})
@@ -260,7 +289,7 @@ def handler(runtime):
                     for mid in acks:
                         text(mid, 128)
                     for mid in acks:
-                        runtime.outbox.ack(device_id, mid)
+                        acknowledge(mid)
                     return self.respond(200, {"acked": acks})
                 if self.path != "/v1/sync":
                     return self.respond(404, {"error": "not_found"})
@@ -277,14 +306,15 @@ def handler(runtime):
                     raise ValueError()
                 for mid in acks:
                     text(mid, 128)
-                runtime.store.register(device_id, body.get("fcm_token"))
+                runtime.store.register(device_id, body.get("fcm_token"), system_notification=body.get('system_notification', False), now=now_ms())
                 runtime.store.snapshot(device_id, profiles, now_ms())
                 for mid in acks:
-                    runtime.outbox.ack(device_id, mid)
+                    acknowledge(mid)
                 device = runtime.store.device(device_id)
                 items = [{"seq": item["seq"], "data": encrypt(item["envelope"], base64.b64decode(device["payload_key"]), device_id)}
                          for item in runtime.outbox.list_after(device_id, after, 50)]
-                self.respond(200, {"items": items, "acked": acks, "profiles": runtime.store.status(device_id)})
+                self.respond(200, {"items": items, "acked": acks, "profiles": runtime.store.status(device_id),
+                    'token_error': device['token_error'], 'system_notification': device['system_notification']})
             except (ValueError, TypeError, KeyError):
                 self.respond(400, {"error": "invalid_request_or_pairing_code"})
             except Exception:
@@ -302,6 +332,7 @@ def main():
     if not (address.is_loopback or address in TAILNET) or not 1 <= args.port <= 65535:
         parser.error("Only loopback or an actual Tailscale IPv4 may be used")
     PRIVATE.mkdir(exist_ok=True)
+    configure_delivery_log(ROOT / 'logs')
     database = PRIVATE / "hub.sqlite3"
     if args.pair:
         code = HubStore(str(database)).create_pairing(now_ms())

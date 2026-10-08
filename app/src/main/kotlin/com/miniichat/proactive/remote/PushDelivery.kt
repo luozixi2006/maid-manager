@@ -31,7 +31,8 @@ object PushDelivery {
                 val settings = SettingsRepository(context).settings.first()
                 val persona = AssistantStore(context).snapshot().firstOrNull { it.id == envelope.personaId }
                 if (persona == null || !persona.canContact(settings.proactiveMessagesEnabled)) {
-                    inbox.finish(deviceId, envelope.messageId)
+                    inbox.finish(deviceId, envelope.messageId, "discarded")
+                    PushTrace.record(context, "discarded", envelope.messageId, "persona_unavailable")
                     continue
                 }
                 var result: PushMergeResult? = null
@@ -42,22 +43,29 @@ object PushDelivery {
                 }
                 if (result is PushMergeResult.Rejected || saved == null) {
                     // Never recreate a deleted chat/persona, nor route another persona's message into it.
-                    inbox.finish(deviceId, envelope.messageId)
+                    inbox.finish(deviceId, envelope.messageId, "discarded")
+                    PushTrace.record(context, "discarded", envelope.messageId, "conversation_unavailable")
                     continue
                 }
                 if (result == null) return@withLock
                 val now = System.currentTimeMillis()
                 val quiet = ProactivePolicy.isInDoNotDisturb(now, settings.proactiveDndStartMinutes, settings.proactiveDndEndMinutes)
                 val tooOldToAlert = now - envelope.createdAt > 24L * 60L * 60L * 1000L
-                val notified = if (quiet || tooOldToAlert) false else ProactiveNotifications.publish(
+                // An unfinished inbox row may have committed history before a process death.
+                // Retry the same tagged notification; finished rows never reach this loop.
+                val alert = inbox.allowAlert(deviceId, envelope.messageId)
+                val notified = if (!alert || quiet || tooOldToAlert) false else ProactiveNotifications.publish(
                     context, persona.displayName, envelope.content, persona.avatarPath,
                     ProactiveDestination("normal", envelope.conversationId), deliveryId = envelope.messageId
                 )
-                inbox.finish(deviceId, envelope.messageId)
+                val outcome = if (notified) "notified" else if (alert && !quiet && !tooOldToAlert) "blocked" else "saved_silent"
+                inbox.finish(deviceId, envelope.messageId, outcome)
+                PushTrace.record(context, "history_committed", envelope.messageId, outcome)
                 ProactiveDiagnostics.record(context, persona.id, when {
                     notified -> "电脑发来的主动消息已保存并提交通知"
                     quiet -> "主动消息已保存；当前处于安静时段"
                     tooOldToAlert -> "离线期间的消息已补回聊天，不再弹出旧提醒"
+                    !alert -> "主动消息已补回原聊天，不重复弹出通知"
                     else -> "主动消息已保存；${ProactiveNotifications.blockedReason(context) ?: "通知暂未显示"}"
                 })
                 try {

@@ -135,7 +135,7 @@ object ProactiveNotifications {
             avatar?.let { setIcon(IconCompat.createWithBitmap(it)) }
         }.build()
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setSmallIcon(R.drawable.ic_push_message)
             .setContentTitle(characterName)
             .setContentText(message)
             .setStyle(NotificationCompat.MessagingStyle(Person.Builder().setName("我").build())
@@ -150,7 +150,7 @@ object ProactiveNotifications {
             .setContentIntent(pendingIntent)
             .setLargeIcon(avatar)
             .setPublicVersion(NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_dialog_email)
+                .setSmallIcon(R.drawable.ic_push_message)
                 .setContentTitle(PUBLIC_TITLE)
                 .setContentText(PUBLIC_TEXT)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
@@ -158,8 +158,9 @@ object ProactiveNotifications {
                 .build())
             .build()
         return try {
-            val notificationId = deliveryId?.let { "remote:$it".hashCode() } ?: requestCode
-            NotificationManagerCompat.from(context).notify(notificationId, notification)
+            if (deliveryId != null) NotificationManagerCompat.from(context).notify(
+                com.miniichat.proactive.remote.PushTrace.notificationTag(deliveryId), 0, notification)
+            else NotificationManagerCompat.from(context).notify(requestCode, notification)
             true
         } catch (_: SecurityException) {
             // Permission can be revoked between checking it and posting; the conversation is already saved.

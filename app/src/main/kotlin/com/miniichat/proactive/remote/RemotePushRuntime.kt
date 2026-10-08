@@ -99,15 +99,32 @@ object RemotePushRuntime {
                 return@withLock
             }
             if (!config.enabled || !config.shareModelKey) return@withLock
-            if (config.fcmToken().isBlank()) config.fcmToken(withTimeout(25000) { firebaseToken() })
+            if (config.fcmToken().isBlank() || System.currentTimeMillis() - config.tokenCheckedAt > 6 * 60 * 60 * 1000L) {
+                config.fcmToken(withTimeout(25000) { firebaseToken() })
+                PushTrace.record(context, "token_refreshed")
+            }
             val profiles = snapshot(context)
             val deviceId = config.deviceId
             PushInbox(context).use { inbox ->
                 val acks = inbox.awaitingAck(deviceId)
                 val body = JSONObject().put("profiles", profiles).put("fcm_token", config.fcmToken())
-                    .put("after", config.cursor).put("acks", JSONArray(acks))
+                    .put("after", config.cursor).put("acks", JSONArray(acks)).put("receipts", inbox.receipts(deviceId))
+                    .put("system_notification", true)
                 require(body.toString().toByteArray(Charsets.UTF_8).size <= 262144) { "主动联系人设内容过多，请减少同时开启的人设或缩短设定" }
                 val result = request(config.base, "/v1/sync", body, config.token())
+                PushTrace.record(context, "sync_received", detail = "items=${result.getJSONArray("items").length()}")
+                if (result.optString("token_error") in setOf("fcm_token_unregistered", "fcm_token_invalid")) {
+                    PushTrace.record(context, "token_invalidated")
+                    withTimeout(25000) {
+                        suspendCancellableCoroutine<Unit> { continuation ->
+                            FirebaseMessaging.getInstance().deleteToken()
+                                .addOnSuccessListener { if (continuation.isActive) continuation.resume(Unit) }
+                                .addOnFailureListener { if (continuation.isActive) continuation.resumeWithException(IllegalStateException("推送令牌更新失败")) }
+                        }
+                        config.fcmToken(firebaseToken())
+                    }
+                    enqueue(context)
+                }
                 if (!config.enabled || config.deviceId != deviceId) return@withLock
                 val accepted = result.getJSONArray("acked")
                 for (index in 0 until accepted.length()) {
@@ -122,7 +139,8 @@ object RemotePushRuntime {
                     val data = item.getJSONObject("data").let { json -> json.keys().asSequence().associateWith { json.getString(it) } }
                     val parsed = PushEnvelopeParser.parse(PushCipher.decrypt(data, config.payloadKey(), deviceId), System.currentTimeMillis(), allowArchived = true)
                     require(parsed is PushParseResult.Accepted) { "电脑返回了无效消息，原聊天未覆盖" }
-                    inbox.offer(deviceId, parsed.envelope, System.currentTimeMillis())
+                    val added = inbox.offer(deviceId, parsed.envelope, System.currentTimeMillis(), source = "sync", allowAlert = false)
+                    if (added) PushTrace.record(context, "catchup_saved", parsed.envelope.messageId)
                     config.cursor(seq) // Durable inbox first; interruption cannot lose the message.
                 }
                 val states = result.getJSONArray("profiles")
@@ -146,8 +164,9 @@ object RemotePushRuntime {
                 // Acknowledge committed messages immediately; FCM acceptance alone is not delivery.
                 val acks = inbox.awaitingAck(deviceId)
                 if (acks.isNotEmpty() && config.enabled && config.deviceId == deviceId) {
-                    request(config.base, "/v1/ack", JSONObject().put("acks", JSONArray(acks)), config.token())
+                    request(config.base, "/v1/ack", JSONObject().put("acks", JSONArray(acks)).put("receipts", inbox.receipts(deviceId)), config.token())
                     acks.forEach { inbox.acknowledged(deviceId, it) }
+                    PushTrace.record(context, "ack_sent", detail = "count=${acks.size}")
                 }
             }
         }
@@ -230,6 +249,7 @@ class RemotePushSyncWorker(context: Context, params: WorkerParameters) : Corouti
         Result.success()
     } catch (cancelled: CancellationException) { throw cancelled }
     catch (_: Exception) {
+        PushTrace.record(applicationContext, "sync_retry")
         RemotePushConfig(applicationContext).status("暂时无法连接电脑，消息仍保留；请检查 Tailscale、电脑服务和模型配置")
         Result.retry()
     }

@@ -58,6 +58,15 @@ class PushDeliveryTest {
         assertTrue(shadowOf(manager).allNotifications.isEmpty())
         assertEquals(2, ConversationStore(app).snapshot().single().messages.size)
     }
+    @Test fun processDeathBetweenHistoryCommitAndNotificationCanRecover() = runBlocking {
+        prepare()
+        val message = envelope()
+        ConversationStore(app).updateConversation("chat") { (PushMerge.merge(it, message) as PushMergeResult.Added).conversation }
+        PushInbox(app).use { it.offer(device, message, now, source = "fcm") }
+        PushDelivery.drain(app)
+        assertEquals(2, ConversationStore(app).snapshot().single().messages.size)
+        assertEquals(1, shadowOf(manager).allNotifications.size)
+    }
     @Test fun deletedChatIsNotRecreated() = runBlocking {
         prepare()
         ConversationStore(app).delete("chat")
@@ -66,6 +75,46 @@ class PushDeliveryTest {
         assertTrue(ConversationStore(app).snapshot().isEmpty())
         assertTrue(shadowOf(manager).allNotifications.isEmpty())
         PushInbox(app).use { assertTrue(it.finished(device, "remote-message")) }
+    }
+    @Test fun appOpenCatchupSavesHistoryWithoutNotificationStorm() = runBlocking {
+        prepare()
+        val messages = (1..12).map { envelope().copy(messageId = "offline-$it") }
+        PushInbox(app).use { inbox -> messages.forEach { inbox.offer(device, it, now, source = "sync", allowAlert = false) } }
+        PushDelivery.drain(app)
+        assertEquals(13, ConversationStore(app).snapshot().single().messages.size)
+        assertTrue(shadowOf(manager).allNotifications.isEmpty())
+        PushInbox(app).use { inbox ->
+            val receipts = inbox.receipts(device)
+            assertEquals(12, receipts.length())
+            assertEquals("sync", receipts.getJSONObject(0).getString("source"))
+            assertEquals("saved_silent", receipts.getJSONObject(0).getString("outcome"))
+            messages.forEach { assertFalse(inbox.offer(device, it, now, source = "fcm")) }
+        }
+        PushDelivery.drain(app)
+        assertEquals(13, ConversationStore(app).snapshot().single().messages.size)
+        assertTrue(shadowOf(manager).allNotifications.isEmpty())
+    }
+
+    @Test fun tappingSystemNotificationDoesNotMakeASecondNotification() = runBlocking {
+        prepare()
+        PushInbox(app).use { it.offer(device, envelope(), now, source = "notification_tap", allowAlert = false) }
+        PushDelivery.drain(app)
+        assertEquals(2, ConversationStore(app).snapshot().single().messages.size)
+        assertTrue(shadowOf(manager).allNotifications.isEmpty())
+        PushInbox(app).use { assertEquals("notification_tap", it.receipts(device).getJSONObject(0).getString("source")) }
+    }
+
+    @Test fun blockedChannelSavesHistoryAndReportsBlockedReceipt() = runBlocking {
+        prepare()
+        com.miniichat.proactive.ProactiveNotifications.ensureChannel(app)
+        val channel = manager.getNotificationChannel("character_messages")
+        channel.importance = NotificationManager.IMPORTANCE_NONE
+        manager.createNotificationChannel(channel)
+        PushInbox(app).use { it.offer(device, envelope(), now, source = "fcm") }
+        PushDelivery.drain(app)
+        assertEquals(2, ConversationStore(app).snapshot().single().messages.size)
+        assertTrue(shadowOf(manager).allNotifications.isEmpty())
+        PushInbox(app).use { assertEquals("blocked", it.receipts(device).getJSONObject(0).getString("outcome")) }
     }
     @Test fun personaOptOutPreventsInsertionAndNotification() = runBlocking {
         prepare(false)
