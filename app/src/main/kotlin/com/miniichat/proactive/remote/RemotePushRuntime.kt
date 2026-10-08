@@ -40,9 +40,20 @@ object RemotePushRuntime {
             "Google Play 服务不可用，暂时无法启用系统推送"
         }
         val address = RemotePushAddress.validate(base)
-        if (!config.paired || config.base != address || code.isNotBlank()) {
-            require(code.matches(Regex("[0-9]{8}"))) { "请填写电脑显示的 8 位配对码" }
-            config.pair(address, request(address, "/v1/pair", JSONObject().put("code", code), null))
+        mutex.withLock {
+            if (!config.paired || config.base != address || code.isNotBlank()) {
+                require(code.matches(Regex("[0-9]{8}"))) { "请填写电脑显示的 8 位配对码" }
+                if (config.paired) {
+                    // Retain old credentials until that computer confirms removal. Re-pairing must
+                    // not leave an orphaned model key generating messages on the previous pairing.
+                    config.enabled(false)
+                    config.pausePending(true)
+                    request(config.base, "/v1/pause", JSONObject(), config.token())
+                    config.pausePending(false)
+                    config.shareModelKey(false)
+                }
+                config.pair(address, request(address, "/v1/pair", JSONObject().put("code", code), null))
+            }
         }
         config.shareModelKey(true) // Called only after the explicit privacy consent in settings.
         config.pausePending(false)
